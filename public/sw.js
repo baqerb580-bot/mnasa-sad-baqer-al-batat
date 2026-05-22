@@ -5,7 +5,7 @@
 // - API calls (/api/*): Network Only (always fresh data)
 // - Images: Stale While Revalidate
 
-const CACHE_VERSION = 'ghazlan-erp-v1.0.0';
+const CACHE_VERSION = 'ghazlan-erp-v1.2.0-' + (new Date().getMonth() + 1) + '-' + new Date().getDate();
 const STATIC_CACHE = `${CACHE_VERSION}-static`;
 const DYNAMIC_CACHE = `${CACHE_VERSION}-dynamic`;
 const IMAGE_CACHE = `${CACHE_VERSION}-images`;

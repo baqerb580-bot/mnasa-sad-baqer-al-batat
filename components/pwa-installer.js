@@ -23,16 +23,30 @@ export default function PWAInstaller() {
       navigator.serviceWorker.register('/sw.js', { scope: '/' })
         .then(reg => {
           console.log('[PWA] Service Worker registered:', reg.scope);
-          // Auto-update on new SW
+          // Check for updates every 60s
+          setInterval(() => reg.update().catch(() => {}), 60000);
+
+          // Auto-update on new SW: skip waiting, then reload page once new SW activates
           reg.addEventListener('updatefound', () => {
             const nw = reg.installing;
             if (nw) {
               nw.addEventListener('statechange', () => {
                 if (nw.state === 'installed' && navigator.serviceWorker.controller) {
-                  console.log('[PWA] New version available');
+                  console.log('[PWA] New version available — applying…');
+                  // Tell new SW to skip waiting and become active
+                  nw.postMessage({ type: 'SKIP_WAITING' });
                 }
               });
             }
+          });
+
+          // When the controlling SW changes, reload once to use fresh assets
+          let reloaded = false;
+          navigator.serviceWorker.addEventListener('controllerchange', () => {
+            if (reloaded) return;
+            reloaded = true;
+            console.log('[PWA] SW controller changed — reloading');
+            window.location.reload();
           });
         })
         .catch(err => console.warn('[PWA] SW registration failed:', err));
