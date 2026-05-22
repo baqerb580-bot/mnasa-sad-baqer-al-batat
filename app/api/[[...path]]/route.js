@@ -1147,7 +1147,29 @@ async function handle(request, params) {
       auth_test: {},
     };
     if (!db) {
-      checks.error = '❌ Database connection failed. Check MONGO_URL env var. For Vercel, use MongoDB Atlas (mongodb+srv://).';
+      // Surface the actual MongoDB driver error message to help user debug
+      const lastError = globalThis.__mongoState?.lastError;
+      checks.database.lastError = lastError || 'no error captured';
+      // Detect common issues by error keywords
+      let hint = '⚠️ Database connection failed. Check MONGO_URL.';
+      if (lastError) {
+        const lo = String(lastError).toLowerCase();
+        if (lo.includes('authentication failed') || lo.includes('bad auth')) {
+          hint = '❌ كلمة سر MongoDB خاطئة — تأكد من استبدال <db_password> في الـ Connection String بكلمة السر الفعلية';
+        } else if (lo.includes('whitelist') || lo.includes('not allowed') || lo.includes('ip')) {
+          hint = '❌ عنوان IP الخاص بـ Vercel غير مسموح — أضف 0.0.0.0/0 في MongoDB Atlas → Network Access';
+        } else if (lo.includes('enotfound') || lo.includes('getaddrinfo')) {
+          hint = '❌ اسم الـ Cluster خاطئ — تأكد من نسخ الـ Connection String كاملاً وصحيحاً';
+        } else if (lo.includes('timeout') || lo.includes('timed out')) {
+          hint = '❌ انتهت مهلة الاتصال — تأكد من إضافة 0.0.0.0/0 في Network Access على MongoDB Atlas';
+        } else if (lo.includes('ssl') || lo.includes('tls')) {
+          hint = '❌ مشكلة SSL/TLS — تأكد من استخدام mongodb+srv:// (وليس mongodb://) في MONGO_URL';
+        } else if (lo.includes('mongodb_url') || lo.includes('not set')) {
+          hint = '❌ MONGO_URL غير مضافة في Vercel Environment Variables';
+        }
+      }
+      checks.database.hint = hint;
+      checks.error = lastError ? `${hint}\n\nالخطأ التقني: ${lastError}` : hint;
       return ok(checks);
     }
     // Run seed

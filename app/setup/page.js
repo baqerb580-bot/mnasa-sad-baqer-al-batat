@@ -129,8 +129,18 @@ export default function SetupDiagnosticPage() {
                 {!dbConnected && !mongoSet && (
                   <p className="text-sm text-red-300">⚠️ يجب إضافة <code className="bg-red-500/20 px-2 py-0.5 rounded">MONGO_URL</code> في Vercel Environment Variables</p>
                 )}
-                {!dbConnected && mongoSet && (
-                  <p className="text-sm text-amber-300">⚠️ MONGO_URL مضافة لكن الاتصال فشل — تحقق من IP Whitelist (0.0.0.0/0) في MongoDB Atlas</p>
+                {!dbConnected && mongoSet && data?.database?.hint && (
+                  <div className="mt-2">
+                    <p className="text-sm text-amber-200 font-bold mb-2">{data.database.hint}</p>
+                    {data.database.lastError && (
+                      <details className="mt-2">
+                        <summary className="text-xs text-gray-400 cursor-pointer hover:text-gray-200">عرض الخطأ التقني الكامل</summary>
+                        <pre className="mt-2 p-2 bg-black/60 rounded text-[10px] text-red-300 overflow-auto whitespace-pre-wrap break-all">
+                          {data.database.lastError}
+                        </pre>
+                      </details>
+                    )}
+                  </div>
                 )}
               </div>
               {data.collections && Object.keys(data.collections).length > 0 && (
