@@ -1102,6 +1102,27 @@ async function handle(request, params) {
 
   if (!path) return ok({ name: 'Ghazlan ERP API', version: '1.0', status: 'running', dbConnected: !!db });
 
+  // ============ 🛑 DB CONNECTION GUARD ============
+  // If MongoDB is not connected, return a clear, actionable Arabic message
+  // for ALL endpoints (except /setup which has its own diagnostic logic).
+  if (!db && path !== 'setup') {
+    const isAuthPath = path.includes('login') || path.includes('auth');
+    const hasMongoUrl = !!process.env.MONGO_URL;
+    return new Response(JSON.stringify({
+      error: hasMongoUrl
+        ? '⚠️ فشل الاتصال بقاعدة البيانات — تحقق من صحة MONGO_URL وأن IP 0.0.0.0/0 مسموح في MongoDB Atlas'
+        : '⚠️ قاعدة البيانات غير معدّة بعد — يجب إضافة MONGO_URL في Vercel Environment Variables ثم Redeploy',
+      _dbNotConnected: true,
+      _mongoUrlSet: hasMongoUrl,
+      _docs: 'افتح /api/setup للتشخيص الكامل، أو اقرأ VERCEL_DEPLOYMENT_FIX.md',
+      _setupUrl: '/api/setup',
+      ...(isAuthPath && { _hint: 'لا يمكن تسجيل الدخول بدون قاعدة بيانات. اتبع خطوات إعداد MongoDB Atlas أولاً.' }),
+    }), {
+      status: 503,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
   // ============ 🔧 SETUP & HEALTH DIAGNOSTICS (Vercel-ready) ============
   // GET /api/setup — runs auto-seed and reports state. Hit this once after deploying.
   if (path === 'setup' && (method === 'GET' || method === 'POST')) {
