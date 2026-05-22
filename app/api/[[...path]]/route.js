@@ -5666,6 +5666,9 @@ async function handle(request, params) {
     const body = await getJsonBody(request);
     const { message, history = [] } = body;
     if (!message) return err('الرسالة فارغة');
+    if (!EMERGENT_LLM_KEY) {
+      return ok({ reply: '⚠️ خدمة الذكاء الاصطناعي غير مفعّلة. يرجى إضافة EMERGENT_LLM_KEY في متغيرات البيئة.' });
+    }
     try {
       const stats = await db.collection('subscribers').find({}).toArray();
       const products = await db.collection('products').find({}).toArray();

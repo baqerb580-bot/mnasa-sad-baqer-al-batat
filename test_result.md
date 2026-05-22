@@ -7705,3 +7705,64 @@ agent_communication:
       Further extraction (older sections like SETTINGS, BACKUP, AI Load Balancing,
       Smart Parts Search) can be done as separate tasks if needed.
 
+  - agent: "main"
+    message: |
+      🚀 PRODUCTION-READINESS PASS COMPLETE (2026-05-22):
+      
+      User report: deployment showing "ScrollArea is not defined" error.
+      Root cause: stale build before earlier ScrollArea fix was applied.
+      
+      Comprehensive audit + fixes:
+      
+      1. Missing imports audit (Python script scans entire codebase for JSX
+         components used without imports, plus helper functions like api/sounds):
+         - components/separated-reports.js → added `api` import ✅
+         - components/balance-management.js → added `api` import ✅
+         - components/isp-sync-center.js → added `api` import ✅
+         - components/whatsapp-manager.js → added `api` import ✅
+         - components/admin/location-requests.js → added `sounds` import ✅
+         - components/admin/pos-manager-reports.js → added `sounds` import ✅
+         These bugs would crash in production but worked in dev due to HMR caching.
+      
+      2. Error boundary fixed:
+         - app/error.js: removed incorrect <html>/<body> wrappers (only global-error.js
+           should have those per Next.js spec)
+         - Improved error UI with retry + home buttons + error digest display
+      
+      3. AI graceful degradation:
+         - /api/ai/chat now returns friendly message when EMERGENT_LLM_KEY missing
+           instead of crashing
+      
+      4. .env.example updated with full VAPID keys section + documentation
+      
+      5. DEPLOYMENT_VERCEL.md created (comprehensive Vercel deployment guide):
+         - Required env vars (MONGO_URL, DB_NAME, NEXT_PUBLIC_BASE_URL)
+         - Recommended env vars (EMERGENT_LLM_KEY, VAPID keys)
+         - Optional WhatsApp service URL (with note it can't run on Vercel itself)
+         - MongoDB Atlas setup instructions
+         - Common issues table
+         - Feature compatibility matrix
+      
+      6. Production build verification:
+         - `yarn build` succeeds cleanly (0 errors, 0 warnings)
+         - All 7 routes built: /, /admin/login, /admin/users, /employee, /store,
+           /api/[[...path]], /_not-found
+         - Bundle sizes reasonable (page.js 379kB → 530kB First Load)
+      
+      7. Runtime verification after fresh build:
+         - 13/13 critical API endpoints return 200 ✅
+         - Login flow works (superadmin → dashboard)
+         - 0 page errors, 0 console errors on dashboard load
+         - All KPIs render correctly (POS 13.8M, 9 subs, 42 products, etc.)
+         - Quick access tiles show new features (CRM, Coupons, Suppliers, Bulk Barcodes)
+         - Right sidebar shows all 20+ menu items including new ones
+      
+      Status: ✅ PRODUCTION-READY. App can be deployed to Vercel without code changes.
+      
+      Files modified:
+      - 6 files: added missing imports (api, sounds)
+      - app/error.js: rewritten (removed html/body)
+      - .env.example: added VAPID section
+      - app/api/[[...path]]/route.js: AI graceful degradation
+      - NEW: DEPLOYMENT_VERCEL.md (deployment guide)
+
