@@ -1,4 +1,6 @@
 'use client';
+import { Trash2 as Trash } from 'lucide-react';
+import { Field } from '@/components/admin/shared/Field';
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { api, fmt, fmtCurrency, safeArr, setArr } from '@/lib/page-shared';
 import { toast } from 'sonner';

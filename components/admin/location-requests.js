@@ -1,4 +1,5 @@
 'use client';
+import { GPSMap } from '@/components/maps-barcode';
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { api, fmt, fmtCurrency, safeArr, setArr } from '@/lib/page-shared';
 import { toast } from 'sonner';
