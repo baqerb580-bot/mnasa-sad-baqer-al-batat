@@ -40,6 +40,17 @@ export default function AccountingPage() {
 
   const handlePrint = () => window.print();
 
+  const handleExportExcel = () => {
+    const url = `${process.env.NEXT_PUBLIC_BASE_URL || ''}/api/accounting/export?period=${period}`;
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `accounting_${period}_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    toast.success('📥 جاري تنزيل ملف Excel...');
+  };
+
   if (!data) return <div className="text-center py-12 text-sm text-muted-foreground">جاري التحميل...</div>;
 
   const maxRev = Math.max(...data.breakdown.map(b => b.revenue), 1);
@@ -60,6 +71,7 @@ export default function AccountingPage() {
               <SelectItem value="year">🗓️ السنة الحالية</SelectItem>
             </SelectContent>
           </Select>
+          <Button onClick={handleExportExcel} className="btn-gold"><FileText className="w-4 h-4 ml-1" /> 📥 تصدير Excel</Button>
           <Button onClick={handlePrint} className="btn-neon"><Printer className="w-4 h-4 ml-1" /> طباعة / PDF</Button>
         </div>
       </div>

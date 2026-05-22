@@ -3335,6 +3335,157 @@ async function handle(request, params) {
     });
   }
 
+  // ============ EXPORT ACCOUNTING TO XLSX ============
+  if (path === 'accounting/export' && method === 'GET') {
+    try {
+      const XLSX = await import('xlsx');
+      const url = new URL(request.url);
+      const period = url.searchParams.get('period') || 'month';
+      const today = new Date().toISOString().slice(0, 10);
+      const month = new Date().toISOString().slice(0, 7);
+      const year = String(new Date().getFullYear());
+      const prefix = period === 'day' ? today : period === 'year' ? year : month;
+      const periodLabel = period === 'day' ? 'اليوم' : period === 'year' ? 'السنة' : 'الشهر';
+
+      // Re-collect data (same logic as summary)
+      const sales = await db.collection('sales').find({ createdAt: { $regex: `^${prefix}` } }).toArray();
+      const activations = await db.collection('activations').find({ createdAt: { $regex: `^${prefix}` } }).toArray();
+      const repairs = await db.collection('repairs').find({ createdAt: { $regex: `^${prefix}` }, status: 'completed' }).toArray();
+      const payrollEntries = await db.collection('payroll_entries').find({ date: { $regex: `^${prefix}` } }).toArray();
+      const advances = await db.collection('advances').find({ status: { $in: ['approved', 'paid'] } }).toArray();
+      const employees = await db.collection('employees').find({}).toArray();
+      const subscribers = await db.collection('subscribers').find({}).toArray();
+
+      const salesRev = sales.reduce((s, x) => s + (x.total || 0), 0);
+      const actsRev = activations.reduce((s, x) => s + (x.amount || 0), 0);
+      const repairsRev = repairs.reduce((s, x) => s + (x.cost || 0), 0);
+      const totalRevenue = salesRev + actsRev + repairsRev;
+      const bonuses = payrollEntries.filter(e => e.type === 'bonus').reduce((s, x) => s + (x.amount || 0), 0);
+      const salariesExp = period === 'month' ? employees.reduce((s, e) => s + (e.salary || 0), 0) : 0;
+      const advanceExp = period === 'month' ? advances.filter(a => a.status === 'approved').reduce((s, a) => s + (a.perInstallment || 0), 0) : 0;
+      const totalExpenses = bonuses + salariesExp + advanceExp;
+      const netProfit = totalRevenue - totalExpenses;
+      const debtors = subscribers.filter(s => (s.balance || 0) < 0);
+      const totalDebt = Math.abs(debtors.reduce((s, x) => s + (x.balance || 0), 0));
+
+      const wb = XLSX.utils.book_new();
+
+      // ===== Sheet 1: ملخص (Summary) =====
+      const summary = [
+        ['مركز الغزلان - التقرير المالي'],
+        ['الفترة', periodLabel + ' (' + prefix + ')'],
+        ['تاريخ التصدير', new Date().toLocaleString('ar-IQ')],
+        [],
+        ['الإيرادات'],
+        ['مبيعات (POS)', salesRev, 'د.ع', sales.length + ' فاتورة'],
+        ['تفعيل اشتراكات', actsRev, 'د.ع', activations.length + ' تفعيل'],
+        ['صيانة مكتملة', repairsRev, 'د.ع', repairs.length + ' تذكرة'],
+        ['إجمالي الإيرادات', totalRevenue, 'د.ع', ''],
+        [],
+        ['المصروفات'],
+        ['مكافآت', bonuses, 'د.ع', ''],
+        ['رواتب', salariesExp, 'د.ع', ''],
+        ['أقساط سلف', advanceExp, 'د.ع', ''],
+        ['إجمالي المصروفات', totalExpenses, 'د.ع', ''],
+        [],
+        ['صافي الربح', netProfit, 'د.ع', netProfit >= 0 ? '🟢 ربح' : '🔴 خسارة'],
+        [],
+        ['الديون المستحقة'],
+        ['عدد المدينين', debtors.length, '', ''],
+        ['إجمالي المبالغ', totalDebt, 'د.ع', ''],
+      ];
+      const ws1 = XLSX.utils.aoa_to_sheet(summary);
+      ws1['!cols'] = [{ wch: 28 }, { wch: 18 }, { wch: 8 }, { wch: 25 }];
+      XLSX.utils.book_append_sheet(wb, ws1, 'الملخص');
+
+      // ===== Sheet 2: المبيعات =====
+      if (sales.length > 0) {
+        const salesRows = sales.map(s => ({
+          'رقم الفاتورة': s.invoiceNumber || s.id,
+          'التاريخ': s.createdAt,
+          'العميل': s.customerName || '-',
+          'الهاتف': s.customerPhone || '-',
+          'الإجمالي': s.total || 0,
+          'الخصم': s.discount || 0,
+          'طريقة الدفع': s.paymentMethod || '-',
+          'الموظف': s.cashierName || '-',
+        }));
+        const ws2 = XLSX.utils.json_to_sheet(salesRows);
+        XLSX.utils.book_append_sheet(wb, ws2, 'المبيعات');
+      }
+
+      // ===== Sheet 3: التفعيلات =====
+      if (activations.length > 0) {
+        const actRows = activations.map(a => ({
+          'التاريخ': a.createdAt,
+          'المشترك': a.subscriberName || '-',
+          'الباقة': a.packageName || '-',
+          'المبلغ': a.amount || 0,
+          'الموظف': a.activatedByName || '-',
+          'ملاحظات': a.notes || '',
+        }));
+        const ws3 = XLSX.utils.json_to_sheet(actRows);
+        XLSX.utils.book_append_sheet(wb, ws3, 'التفعيلات');
+      }
+
+      // ===== Sheet 4: الصيانة =====
+      if (repairs.length > 0) {
+        const repRows = repairs.map(r => ({
+          'رقم التذكرة': r.ticketNumber || r.id,
+          'التاريخ': r.createdAt,
+          'العميل': r.customerName || '-',
+          'الجهاز': r.deviceName || '-',
+          'العطل': r.issue || '-',
+          'التكلفة': r.cost || 0,
+          'الفني': r.technicianName || '-',
+        }));
+        const ws4 = XLSX.utils.json_to_sheet(repRows);
+        XLSX.utils.book_append_sheet(wb, ws4, 'الصيانة');
+      }
+
+      // ===== Sheet 5: المدينون =====
+      if (debtors.length > 0) {
+        const debtRows = debtors.sort((a, b) => (a.balance || 0) - (b.balance || 0)).map((d, i) => ({
+          '#': i + 1,
+          'الاسم': d.name,
+          'الهاتف': d.phone || '-',
+          'المنطقة': d.zoneName || '-',
+          'المبلغ المستحق': Math.abs(d.balance || 0),
+        }));
+        const ws5 = XLSX.utils.json_to_sheet(debtRows);
+        XLSX.utils.book_append_sheet(wb, ws5, 'المدينون');
+      }
+
+      // ===== Sheet 6: المصروفات (مكافآت) =====
+      const bonusList = payrollEntries.filter(e => e.type === 'bonus');
+      if (bonusList.length > 0) {
+        const bRows = bonusList.map(b => ({
+          'التاريخ': b.date,
+          'الموظف': b.employeeName || '-',
+          'النوع': b.type,
+          'المبلغ': b.amount || 0,
+          'السبب': b.reason || '-',
+        }));
+        const ws6 = XLSX.utils.json_to_sheet(bRows);
+        XLSX.utils.book_append_sheet(wb, ws6, 'المكافآت');
+      }
+
+      const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+      const filename = `accounting_${prefix}_${Date.now()}.xlsx`;
+      return new Response(buffer, {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          'Content-Disposition': `attachment; filename="${filename}"`,
+          'Content-Length': String(buffer.length),
+        },
+      });
+    } catch (e) {
+      console.error('[accounting/export] error:', e);
+      return err('فشل التصدير: ' + (e?.message || ''), 500);
+    }
+  }
+
   // ============ E-COMMERCE ORDERS ============
   if (path === 'orders' && method === 'GET') {
     const url = new URL(request.url);

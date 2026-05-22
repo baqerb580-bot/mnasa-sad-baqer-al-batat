@@ -53,9 +53,10 @@ export default function BackupSection({ draft, update, runBackup }) {
     setBusy(false);
   };
 
-  // Helper to update Google Drive nested settings
-  const updateGd = (key, value) => {
-    const merged = { ...gd, [key]: value };
+  // Helper to update Google Drive nested settings (supports patch object too)
+  const updateGd = (patchOrKey, maybeValue) => {
+    const patch = typeof patchOrKey === 'object' ? patchOrKey : { [patchOrKey]: maybeValue };
+    const merged = { ...(draft.backup?.googleDrive || {}), ...patch };
     update('backup', 'googleDrive', merged);
   };
 
@@ -70,17 +71,17 @@ export default function BackupSection({ draft, update, runBackup }) {
     if (!gd.folderUrl) { toast.error('أدخل رابط/مسار Google Drive أولاً'); return; }
     setTestingGd(true);
     try {
+      const folderId = extractDriveFolderId(gd.folderUrl);
       const r = await api('settings/backup/gdrive-test', {
         method: 'POST',
-        body: JSON.stringify({ folderUrl: gd.folderUrl, folderId: extractDriveFolderId(gd.folderUrl) }),
+        body: JSON.stringify({ folderUrl: gd.folderUrl, folderId }),
       });
       if (r?.success) {
         toast.success('✅ تم الاتصال — المجلد جاهز للاستخدام');
-        updateGd('verified', true);
-        updateGd('folderId', extractDriveFolderId(gd.folderUrl));
+        updateGd({ verified: true, folderId });
       } else {
         toast.warning(r?.message || 'تم الحفظ — يحتاج تفعيل OAuth لاحقاً');
-        updateGd('verified', false);
+        updateGd({ verified: false });
       }
     } catch (e) {
       toast.error('فشل الاتصال: ' + (e?.message || ''));
@@ -202,7 +203,7 @@ export default function BackupSection({ draft, update, runBackup }) {
               <div className="flex gap-2">
                 <Input
                   value={gd.folderUrl || ''}
-                  onChange={e => { updateGd('folderUrl', e.target.value); updateGd('verified', false); }}
+                  onChange={e => updateGd({ folderUrl: e.target.value, verified: false })}
                   placeholder="https://drive.google.com/drive/folders/XXXXXXXXXXXX"
                   className="bg-input/30 border-gold/20 font-mono text-xs flex-1"
                   dir="ltr"
