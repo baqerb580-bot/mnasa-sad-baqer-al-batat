@@ -52,8 +52,14 @@ function LoginForm() {
       const next = sp?.get('next') || '/';
       router.replace(next);
     } catch (e) {
-      setError(e?.message || 'فشل تسجيل الدخول');
-      toast.error(e?.message || 'فشل تسجيل الدخول');
+      const msg = e?.message || 'فشل تسجيل الدخول';
+      setError(msg);
+      // If DB is not connected, show a clearer toast with link to /setup
+      if (msg.includes('قاعدة البيانات') || msg.includes('MONGO_URL') || msg.includes('غير متصلة')) {
+        toast.error('⚠️ قاعدة البيانات غير معدّة — افتح /setup للتشخيص', { duration: 10000 });
+      } else {
+        toast.error(msg);
+      }
     }
     setSubmitting(false);
   };
@@ -210,6 +216,15 @@ function LoginForm() {
                 <Shield className="w-3 h-3 text-emerald-400" />
                 اتصال مشفّر · bcrypt + Sessions · حماية ضد محاولات الاختراق
               </p>
+              {/* Setup helper link — only shown if there's a DB error */}
+              {error && (error.includes('قاعدة البيانات') || error.includes('MONGO_URL') || error.includes('null')) && (
+                <a
+                  href="/setup"
+                  className="inline-flex items-center gap-1.5 mt-3 text-xs text-amber-400 hover:text-amber-300 underline"
+                >
+                  🔧 افتح صفحة التشخيص والإعداد
+                </a>
+              )}
             </div>
           </div>
         </div>
