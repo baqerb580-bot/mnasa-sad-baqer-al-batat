@@ -735,6 +735,8 @@ async function notifyEmployee(db, { employeeId, type, title, message, entityType
 
 import { tgSend, tgEdit, tgAnswerCallback, buildHome, buildReports, buildEmployees, buildSubscribers, buildFinance, buildMaintenance, buildNetwork, buildMe, buildLogs, buildAdmin, ROLE_DEFAULT_PERMS, PERMS_ALL } from '@/lib/telegram-bot';
 import bcrypt from 'bcryptjs';
+import * as OTPAuth from 'otpauth';
+import QRCode from 'qrcode';
 import { isConfigured as waIsConfigured, waStatus, waHealth, waQr, waConnect, waDisconnect, waSend, waSendBulk } from '@/lib/whatsapp-client';
 import { runSync as runIspSync } from '@/lib/isp-sync';
 import { runBackup as runBackupLib, listBackups as listBackupsLib, getBackupFile, deleteBackup as deleteBackupLib, startScheduler as startBackupScheduler } from '@/lib/backup';
@@ -1054,6 +1056,43 @@ async function handle(request, params) {
     const okPw = await verifyPassword(password, user.passwordHash || user.password);
     if (!okPw) { await recordAttempt(false, user.id); return err('بيانات الدخول غير صحيحة', 401); }
 
+    // ===== 2FA check =====
+    if (user.twoFactorEnabled && user.twoFactorSecret) {
+      const code = String(body.code || body.twoFactorCode || '').replace(/\s+/g, '');
+      const recoveryCode = String(body.recoveryCode || '').replace(/\s+/g, '').toUpperCase();
+      if (!code && !recoveryCode) {
+        // First step: request 2FA from client
+        return ok({ requires2FA: true, message: 'يرجى إدخال رمز التحقق من تطبيق المصادقة' });
+      }
+      let twofaOk = false;
+      if (code) {
+        try {
+          const totp = new OTPAuth.TOTP({
+            issuer: 'مركز الغزلان', label: user.username,
+            algorithm: 'SHA1', digits: 6, period: 30,
+            secret: OTPAuth.Secret.fromBase32(user.twoFactorSecret),
+          });
+          const delta = totp.validate({ token: code, window: 1 });
+          twofaOk = delta !== null;
+        } catch {}
+      }
+      if (!twofaOk && recoveryCode && Array.isArray(user.twoFactorRecoveryHashes)) {
+        // Try each recovery hash
+        for (let i = 0; i < user.twoFactorRecoveryHashes.length; i++) {
+          const h = user.twoFactorRecoveryHashes[i];
+          if (await verifyPassword(recoveryCode, h)) {
+            twofaOk = true;
+            // Burn the used code
+            const remaining = user.twoFactorRecoveryHashes.filter((_, idx) => idx !== i);
+            await db.collection('users').updateOne({ id: user.id }, { $set: { twoFactorRecoveryHashes: remaining } });
+            await logActivity(db, { action: '2fa_recovery_used', entity: 'users', entityId: user.id, user: user.name, details: `استخدم رمز استعادة (متبقي ${remaining.length})`, ip: clientIp });
+            break;
+          }
+        }
+      }
+      if (!twofaOk) { await recordAttempt(false, user.id); return err('رمز التحقق غير صحيح', 401); }
+    }
+
     // Create session
     const { token, session } = await createSession(db, user, request);
     await recordAttempt(true, user.id);
@@ -1118,6 +1157,8 @@ async function handle(request, params) {
     return ok({
       id: user.id, username: user.username, name: user.name, email: user.email, phone: user.phone,
       avatar: user.avatar, role: user.role, permissions: user.permissions || [],
+      twoFactorEnabled: !!user.twoFactorEnabled,
+      recoveryCodesRemaining: Array.isArray(user.twoFactorRecoveryHashes) ? user.twoFactorRecoveryHashes.length : 0,
       lastLoginAt: user.lastLoginAt, lastLoginIp: user.lastLoginIp, lastLoginDevice: user.lastLoginDevice,
       session: { id: user._session.id, device: user._session.device, browser: user._session.browser, os: user._session.os, createdAt: user._session.createdAt },
     });
@@ -1333,6 +1374,89 @@ async function handle(request, params) {
     const id = path.split('/')[1];
     const attempts = await db.collection('login_attempts').find({ userId: id }).sort({ ts: -1 }).limit(100).toArray();
     return ok(attempts.map(a => { delete a._id; return a; }));
+  }
+
+  // ============ TWO-FACTOR AUTHENTICATION (TOTP) ============
+
+  // POST /api/auth/2fa/setup — generates secret + QR code (requires auth)
+  if (path === 'auth/2fa/setup' && method === 'POST') {
+    const me = await getCurrentUser(db, request);
+    if (!me) return err('غير مصرّح', 401);
+    const secret = new OTPAuth.Secret({ size: 20 });
+    const totp = new OTPAuth.TOTP({
+      issuer: 'مركز الغزلان', label: me.username,
+      algorithm: 'SHA1', digits: 6, period: 30, secret,
+    });
+    const otpauth = totp.toString();
+    const qrDataUrl = await QRCode.toDataURL(otpauth, { width: 240, margin: 1, color: { dark: '#0f0f19', light: '#ffffff' } });
+    // Save secret (base32) as pending (not enabled until verified)
+    await db.collection('users').updateOne({ id: me.id }, {
+      $set: { twoFactorSecretPending: secret.base32, twoFactorPendingAt: new Date().toISOString() },
+    });
+    return ok({ secret: secret.base32, qrDataUrl, otpauth });
+  }
+
+  // POST /api/auth/2fa/verify — verifies the code and ENABLES 2FA
+  if (path === 'auth/2fa/verify' && method === 'POST') {
+    const me = await getCurrentUser(db, request);
+    if (!me) return err('غير مصرّح', 401);
+    const body = await getJsonBody(request);
+    const code = String(body.code || '').replace(/\s+/g, '');
+    if (!/^\d{6}$/.test(code)) return err('الرمز يجب أن يكون 6 أرقام', 400);
+    const fresh = await db.collection('users').findOne({ id: me.id });
+    const secretB32 = fresh?.twoFactorSecretPending;
+    if (!secretB32) return err('لم تبدأ إعداد 2FA. ابدأ من جديد.', 400);
+    const totp = new OTPAuth.TOTP({
+      issuer: 'مركز الغزلان', label: me.username,
+      algorithm: 'SHA1', digits: 6, period: 30,
+      secret: OTPAuth.Secret.fromBase32(secretB32),
+    });
+    const delta = totp.validate({ token: code, window: 1 });
+    const isValid = delta !== null;
+    if (!isValid) return err('الرمز غير صحيح. تحقق من الوقت في تطبيق المصادقة.', 401);
+    // Generate 10 backup recovery codes (one-time use)
+    const recoveryCodes = Array.from({ length: 10 }, () => uuidv4().slice(0, 8).toUpperCase());
+    const recoveryHashes = await Promise.all(recoveryCodes.map(c => hashPassword(c)));
+    await db.collection('users').updateOne({ id: me.id }, {
+      $set: {
+        twoFactorSecret: secretB32,
+        twoFactorEnabled: true,
+        twoFactorEnabledAt: new Date().toISOString(),
+        twoFactorRecoveryHashes: recoveryHashes,
+      },
+      $unset: { twoFactorSecretPending: '', twoFactorPendingAt: '' },
+    });
+    await logActivity(db, { action: '2fa_enabled', entity: 'users', entityId: me.id, user: me.name, details: 'فعّل المصادقة الثنائية', ip: clientIp });
+    return ok({ success: true, recoveryCodes });
+  }
+
+  // POST /api/auth/2fa/disable — disable 2FA (requires current password)
+  if (path === 'auth/2fa/disable' && method === 'POST') {
+    const me = await getCurrentUser(db, request);
+    if (!me) return err('غير مصرّح', 401);
+    const body = await getJsonBody(request);
+    const pw = String(body.password || '');
+    const fresh = await db.collection('users').findOne({ id: me.id });
+    const okPw = await verifyPassword(pw, fresh.passwordHash || fresh.password);
+    if (!okPw) return err('كلمة المرور غير صحيحة', 401);
+    await db.collection('users').updateOne({ id: me.id }, {
+      $set: { twoFactorEnabled: false, twoFactorDisabledAt: new Date().toISOString() },
+      $unset: { twoFactorSecret: '', twoFactorSecretPending: '', twoFactorRecoveryHashes: '' },
+    });
+    await logActivity(db, { action: '2fa_disabled', entity: 'users', entityId: me.id, user: me.name, details: 'عطّل المصادقة الثنائية', ip: clientIp });
+    return ok({ success: true });
+  }
+
+  // POST /api/auth/2fa/regenerate-recovery — generate new recovery codes
+  if (path === 'auth/2fa/regenerate-recovery' && method === 'POST') {
+    const me = await getCurrentUser(db, request);
+    if (!me) return err('غير مصرّح', 401);
+    const fresh = await db.collection('users').findOne({ id: me.id });
+    if (!fresh?.twoFactorEnabled) return err('المصادقة الثنائية غير مفعّلة', 400);
+    const recoveryCodes = Array.from({ length: 10 }, () => uuidv4().slice(0, 8).toUpperCase());
+    const recoveryHashes = await Promise.all(recoveryCodes.map(c => hashPassword(c)));
+    await db.collection('users').updateOne({ id: me.id }, { $set: { twoFactorRecoveryHashes: recoveryHashes } });
+    return ok({ recoveryCodes });
   }
   // ============ END AUTH/USERS ============
 

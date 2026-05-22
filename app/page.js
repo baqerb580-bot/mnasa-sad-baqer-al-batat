@@ -33,6 +33,7 @@ import {
   HardDrive, Plug, Battery, ScanLine, Receipt, ShoppingBag, UserCheck,
   Building2, BarChart, PieChart as PieIcon, Boxes, ChevronDown, Printer, ListTodo, Check, XCircle, LogOut, MessageSquare, QrCode, Power, RefreshCw, Wallet, Brain
 } from 'lucide-react';
+import AdminLayoutClient from '@/components/admin-layout-client';
 import {
   LineChart, Line, AreaChart, Area, BarChart as RBarChart, Bar,
   PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -8386,4 +8387,10 @@ function ActivityLogsPage() {
   );
 }
 
-export default App;
+export default function ProtectedApp() {
+  return (
+    <AdminLayoutClient>
+      <App />
+    </AdminLayoutClient>
+  );
+}

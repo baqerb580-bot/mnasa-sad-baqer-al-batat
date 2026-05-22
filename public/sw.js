@@ -106,14 +106,14 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // ===== HTML pages: Network First (fast fallback) =====
+  // ===== HTML pages: Network First (longer timeout for dev) =====
   if (request.mode === 'navigate' || request.destination === 'document') {
-    event.respondWith(networkFirst(request, DYNAMIC_CACHE, 3000));
+    event.respondWith(networkFirst(request, DYNAMIC_CACHE, 30000));
     return;
   }
 
   // ===== Default: Network First =====
-  event.respondWith(networkFirst(request, DYNAMIC_CACHE, 5000));
+  event.respondWith(networkFirst(request, DYNAMIC_CACHE, 30000));
 });
 
 // ============ STRATEGIES ============
