@@ -7564,3 +7564,97 @@ agent_communication:
       NO CRITICAL ISSUES FOUND. All new APIs are production-ready.
       Backend testing complete. Ready for main agent to summarize and finish.
 
+
+
+  - task: "Route.js Refactoring - Regression Test"
+    implemented: true
+    working: true
+    file: "app/api/[[...path]]/route.js, /app/lib/api-handlers/*.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: |
+            Refactored route.js from 6570 to 5796 lines by extracting 5 handler groups into separate modules:
+            - /app/lib/api-handlers/crm.js (CRM endpoints)
+            - /app/lib/api-handlers/coupons.js (Coupons endpoints)
+            - /app/lib/api-handlers/suppliers.js (Suppliers & Purchase Orders)
+            - /app/lib/api-handlers/push.js (Push Notifications)
+            - /app/lib/api-handlers/mobile.js (Mobile App endpoints)
+            Modular dispatch implemented at line 5769 using handler loop.
+        - working: true
+          agent: "testing"
+          comment: |
+            ✅ PASSED - 100% BACKWARD COMPATIBILITY CONFIRMED (20/20 tests passed)
+            
+            Tested all extracted handlers via new modular dispatch:
+            
+            ===== CRM APIs (2/2 PASSED) =====
+            ✅ GET /api/crm/overview - Returns totals, byTier, byRisk, top10, atRisk (9 customers)
+            ✅ GET /api/crm/customers - Returns customers array with count=9
+            
+            ===== Coupons APIs (4/4 PASSED) =====
+            ✅ POST /api/coupons - Created REGRESSION1 coupon (10% off) with 201 status
+            ✅ GET /api/coupons - Returns array containing REGRESSION1
+            ✅ POST /api/coupons/validate - Correctly calculates discount=5000 for orderTotal=50000
+            ✅ DELETE /api/coupons/:id - Successfully deleted REGRESSION1 coupon
+            
+            ===== Suppliers APIs (3/3 PASSED) =====
+            ✅ POST /api/suppliers - Created "اختبار refactor" supplier with 201 status
+            ✅ GET /api/suppliers - Returns array including test supplier
+            ✅ DELETE /api/suppliers/:id - Successfully deleted test supplier
+            
+            ===== Push Notifications APIs (2/2 PASSED) =====
+            ✅ GET /api/push/vapid-key - Returns publicKey starting with 'B'
+            ✅ GET /api/push/subscriptions - Returns array (0 subscriptions found)
+            
+            ===== Mobile App APIs (1/1 PASSED) =====
+            ✅ GET /api/mobile-app/info - Returns correct appId="com.ghazlan.erp"
+            
+            ===== Original Endpoints - Regression Check (8/8 PASSED) =====
+            ✅ GET /api/dashboard/stats - 200 OK (no regression)
+            ✅ GET /api/ai/insights - 200 OK, returns 3 insights (no regression)
+            ✅ GET /api/products - 200 OK, returns 42 products (no regression)
+            ✅ GET /api/subscribers - 200 OK, returns 9 subscribers (no regression)
+            ✅ POST /api/auth/login - 200 OK, token received (no regression)
+            ✅ GET /api/zones - 200 OK, returns 8 zones (no regression)
+            ✅ GET /api/orders - 200 OK, returns 3 orders (no regression)
+            ✅ GET /api/whatsapp/templates - 200 OK, returns templates object (no regression)
+            
+            REFACTORING VERIFICATION:
+            - All extracted handlers working via new modular dispatch (line 5769)
+            - Handler loop correctly returns null for unhandled paths
+            - No 404 or 500 errors found
+            - All response structures unchanged
+            - All status codes correct (200, 201 as expected)
+            - All field validations working
+            - Arabic error messages preserved
+            - UUID generation working
+            - Database operations working (create, read, delete)
+            
+            NO REGRESSIONS FOUND. Refactoring successful - code is cleaner and all functionality preserved.
+
+agent_communication:
+  - agent: "main"
+    message: |
+      Refactored route.js by extracting 5 handler groups (CRM, Coupons, Suppliers, Push, Mobile App) 
+      into separate modules at /app/lib/api-handlers/*.js. Reduced route.js from 6570 to 5796 lines.
+      Implemented modular dispatch using handler loop at line 5769.
+      Please run regression tests to ensure backward compatibility.
+  - agent: "testing"
+    message: |
+      🎉 REGRESSION TESTING COMPLETE - 100% BACKWARD COMPATIBILITY CONFIRMED
+      
+      Tested 20 endpoints (12 extracted + 8 original):
+      
+      ✅ All extracted handlers working via new modular dispatch
+      ✅ All original endpoints still working (no regressions)
+      ✅ All response structures unchanged
+      ✅ All status codes correct
+      ✅ All validations working
+      ✅ No 404 or 500 errors
+      
+      Refactoring successful - code is cleaner, more maintainable, and all functionality preserved.
+      NO CRITICAL ISSUES FOUND. Ready for production.
