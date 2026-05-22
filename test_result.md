@@ -7819,3 +7819,41 @@ agent_communication:
       - app/api/[[...path]]/route.js: AI graceful degradation
       - NEW: DEPLOYMENT_VERCEL.md (deployment guide)
 
+  - agent: "main"
+    message: |
+      🔧 RADIX SELECT EMPTY-VALUE BUG FIX (2026-05-22):
+      
+      User report: Error "A <Select.Item /> must have a value prop that is not an empty string"
+      Root cause: Radix UI v2+ no longer allows empty string as SelectItem value (it's reserved
+      for the placeholder/clear behavior). Code had 5 instances using `value=""`.
+      
+      Fixed files:
+      1. components/balance-management.js:
+         - 2 SelectItem value="" → value="__all"
+         - useState('') → useState('__all') for filterAcc and filterType
+         - loadTx: skip filter param when value === '__all'
+      
+      2. components/whatsapp-manager.js:
+         - SelectItem value="" (custom template) → value="__custom"
+         - SelectItem value="" الكل (status filter) → value="__all"
+         - SelectItem value="" الكل (type filter) → value="__all"
+         - filter useState initial value '' → '__all'
+         - sendBulk(): convert __custom to empty for backend API compatibility
+         - loadMessages(): skip filter param when value === '__all'
+         - JSX condition `!bulk.templateKey` → `bulk.templateKey === '__custom'`
+      
+      Frontend testing agent verification (2026-05-22):
+      ✅ Login + Dashboard work flawlessly
+      ✅ WhatsApp Manager: Templates tab + Bulk Send tab — no Radix errors
+      ✅ Balance Management filters: no errors when changing account/type
+      ✅ All sidebar sections clicked, none produce "Select.Item must have value" error
+      ✅ All new feature pages (CRM, Coupons, Suppliers, Bulk Barcodes, Push, Mobile) load OK
+      ✅ POS, Products, Tasks, Employees, Orders, Settings all work
+      ✅ 0 React console errors related to Radix Select
+      
+      Status: ✅ Bug fully resolved. App is production-stable.
+      
+      Minor non-critical observation: Next.js RSC prefetch sometimes shows "Failed to fetch
+      RSC payload" warning but falls back to standard navigation — does NOT affect
+      functionality (this is a Next.js 14 quirk during dev).
+
