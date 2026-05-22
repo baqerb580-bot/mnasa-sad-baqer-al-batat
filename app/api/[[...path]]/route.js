@@ -983,32 +983,115 @@ function hasRoleAtLeast(userRole, minRole) {
 }
 
 // Ensure default super_admin exists (seed on first call)
+// 🔄 Self-healing: idempotent — auto-runs on every cold start (Vercel friendly)
 async function ensureSuperAdminSeeded(db) {
-  if (!db) return;
-  const existing = await db.collection('users').countDocuments({ role: 'super_admin' });
-  if (existing > 0) return;
-  const passwordHash = await hashPassword('SuperAdmin@2026');
-  const user = {
-    id: uuidv4(),
-    username: 'superadmin',
-    name: 'المدير العام',
-    email: 'admin@ghazlan.iq',
-    phone: '',
-    avatar: '/logo-icon.png',
-    role: 'super_admin',
-    permissions: ['*'],
-    passwordHash,
-    active: true,
-    twoFactorEnabled: false,
-    mustChangePassword: false,
-    lastLoginAt: null,
-    lastLoginIp: null,
-    lastLoginDevice: null,
-    createdAt: new Date().toISOString(),
-    createdBy: 'system_seed',
-  };
-  await db.collection('users').insertOne(user);
-  console.log('[auth] Seeded default super_admin (username: superadmin, password: SuperAdmin@2026)');
+  if (!db) return { seeded: [], errors: ['no_db'] };
+  const seeded = [];
+  const errors = [];
+  try {
+    // 1) Ensure 'superadmin' user exists in users collection
+    const superExisting = await db.collection('users').findOne({ username: 'superadmin' });
+    if (!superExisting) {
+      const passwordHash = await hashPassword('SuperAdmin@2026');
+      await db.collection('users').insertOne({
+        id: uuidv4(),
+        username: 'superadmin',
+        name: 'المدير العام',
+        email: 'admin@ghazlan.iq',
+        phone: '',
+        avatar: '/logo-icon.png',
+        role: 'super_admin',
+        permissions: ['*'],
+        passwordHash,
+        active: true,
+        twoFactorEnabled: false,
+        mustChangePassword: false,
+        lastLoginAt: null,
+        lastLoginIp: null,
+        lastLoginDevice: null,
+        createdAt: new Date().toISOString(),
+        createdBy: 'system_seed',
+      });
+      seeded.push('users:superadmin');
+      console.log('[auth-seed] ✅ Created superadmin/SuperAdmin@2026');
+    }
+
+    // 2) Ensure 'admin' user exists in users collection (matches /admin/login page)
+    const adminExisting = await db.collection('users').findOne({ username: 'admin' });
+    if (!adminExisting) {
+      const passwordHash = await hashPassword('admin1982');
+      await db.collection('users').insertOne({
+        id: uuidv4(),
+        username: 'admin',
+        name: 'المدير',
+        email: 'admin@ghazlan.iq',
+        phone: '',
+        avatar: '/logo-icon.png',
+        role: 'super_admin',
+        permissions: ['*'],
+        passwordHash,
+        active: true,
+        twoFactorEnabled: false,
+        mustChangePassword: false,
+        lastLoginAt: null,
+        lastLoginIp: null,
+        lastLoginDevice: null,
+        createdAt: new Date().toISOString(),
+        createdBy: 'system_seed',
+      });
+      seeded.push('users:admin');
+      console.log('[auth-seed] ✅ Created admin/admin1982');
+    }
+
+    // 3) Ensure legacy admin password is set in settings (for /api/admin/login)
+    const s = await db.collection('settings').findOne({});
+    if (!s?.security?.adminPasswordHash) {
+      const passwordHash = await hashPassword('admin1982');
+      await db.collection('settings').updateOne(
+        {},
+        { $set: {
+            'security.adminUsername': 'admin',
+            'security.adminPasswordHash': passwordHash,
+            updatedAt: new Date().toISOString(),
+        }},
+        { upsert: true }
+      );
+      seeded.push('settings:adminPasswordHash');
+      console.log('[auth-seed] ✅ Set legacy admin password in settings');
+    }
+
+    // 4) Ensure admin employee exists in employees collection (for /employee portal)
+    const empExisting = await db.collection('employees').findOne({ username: 'admin' });
+    if (!empExisting) {
+      const passwordHash = await hashPassword('admin1982');
+      await db.collection('employees').insertOne({
+        id: uuidv4(),
+        username: 'admin',
+        password: passwordHash,
+        passwordHash,
+        name: 'المدير',
+        phone: '',
+        role: 'مدير',
+        salary: 0,
+        kpi: 100,
+        photo: '👑',
+        shiftStart: '08:00',
+        shiftEnd: '17:00',
+        permissions: ['tasks','repairs','agents','reports','isp','employees','subscribers','sales','pos','crm','suppliers','accounting','settings'],
+        status: 'active',
+        active: true,
+        attendance: 'present',
+        createdAt: new Date().toISOString(),
+        createdBy: 'system_seed',
+      });
+      seeded.push('employees:admin');
+      console.log('[auth-seed] ✅ Created employee admin/admin1982');
+    }
+  } catch (e) {
+    errors.push(String(e?.message || e));
+    console.error('[auth-seed] ❌ Error:', e?.message);
+  }
+  return { seeded, errors };
 }
 
 async function handle(request, params) {
@@ -1018,6 +1101,86 @@ async function handle(request, params) {
   const clientIp = request.headers.get('x-forwarded-for')?.split(',')[0] || request.headers.get('x-real-ip') || 'unknown';
 
   if (!path) return ok({ name: 'Ghazlan ERP API', version: '1.0', status: 'running', dbConnected: !!db });
+
+  // ============ 🔧 SETUP & HEALTH DIAGNOSTICS (Vercel-ready) ============
+  // GET /api/setup — runs auto-seed and reports state. Hit this once after deploying.
+  if (path === 'setup' && (method === 'GET' || method === 'POST')) {
+    const checks = {
+      timestamp: new Date().toISOString(),
+      env: {
+        MONGO_URL_set: !!process.env.MONGO_URL,
+        MONGO_URL_type: process.env.MONGO_URL?.startsWith('mongodb+srv://') ? 'atlas' :
+                        process.env.MONGO_URL?.includes('localhost') ? 'localhost' :
+                        process.env.MONGO_URL ? 'custom' : 'missing',
+        DB_NAME_set: !!process.env.DB_NAME,
+        DB_NAME: process.env.DB_NAME || '(default: ghazlan_erp)',
+        NEXT_PUBLIC_BASE_URL: process.env.NEXT_PUBLIC_BASE_URL || '(not set)',
+        EMERGENT_LLM_KEY_set: !!process.env.EMERGENT_LLM_KEY,
+        NODE_ENV: process.env.NODE_ENV,
+        VERCEL: !!process.env.VERCEL,
+        VERCEL_URL: process.env.VERCEL_URL || null,
+      },
+      database: { connected: !!db },
+      seed: null,
+      collections: {},
+      auth_test: {},
+    };
+    if (!db) {
+      checks.error = '❌ Database connection failed. Check MONGO_URL env var. For Vercel, use MongoDB Atlas (mongodb+srv://).';
+      return ok(checks);
+    }
+    // Run seed
+    try {
+      checks.seed = await ensureSuperAdminSeeded(db);
+    } catch (e) {
+      checks.seed = { errors: [String(e?.message || e)] };
+    }
+    // Collection counts
+    try {
+      checks.collections = {
+        users: await db.collection('users').countDocuments({}),
+        employees: await db.collection('employees').countDocuments({}),
+        subscribers: await db.collection('subscribers').countDocuments({}),
+        settings: await db.collection('settings').countDocuments({}),
+      };
+    } catch (e) { checks.collections.error = String(e?.message || e); }
+    // Verify admin login works
+    try {
+      const adminUser = await db.collection('users').findOne({ username: 'admin' });
+      if (adminUser?.passwordHash) {
+        const ok1 = await verifyPassword('admin1982', adminUser.passwordHash);
+        checks.auth_test['users.admin/admin1982'] = ok1 ? '✅ works' : '❌ password mismatch';
+      } else {
+        checks.auth_test['users.admin/admin1982'] = '❌ user not found';
+      }
+      const empUser = await db.collection('employees').findOne({ username: 'admin' });
+      if (empUser?.passwordHash || empUser?.password) {
+        const hash = empUser.passwordHash || empUser.password;
+        const ok2 = await verifyPassword('admin1982', hash);
+        checks.auth_test['employees.admin/admin1982'] = ok2 ? '✅ works' : '❌ password mismatch';
+      } else {
+        checks.auth_test['employees.admin/admin1982'] = '❌ user not found';
+      }
+      const s = await db.collection('settings').findOne({});
+      if (s?.security?.adminPasswordHash) {
+        const ok3 = await verifyPassword('admin1982', s.security.adminPasswordHash);
+        checks.auth_test['settings.adminPasswordHash'] = ok3 ? '✅ works' : '❌ password mismatch';
+      } else {
+        checks.auth_test['settings.adminPasswordHash'] = '❌ not configured';
+      }
+    } catch (e) { checks.auth_test.error = String(e?.message || e); }
+
+    // Clear any account locks (for fresh deployments)
+    try { await db.collection('login_attempts').deleteMany({ success: false }); checks.cleared_failed_logins = true; } catch {}
+
+    checks.status = (checks.seed?.errors?.length || 0) === 0 ? '✅ Ready' : '⚠️ Errors';
+    checks.next_steps = [
+      'Login at /admin/login with admin / admin1982',
+      'Or use legacy admin login at / with same credentials',
+      'Or login at /employee with admin / admin1982',
+    ];
+    return ok(checks);
+  }
 
   // Seed default super_admin (idempotent — only runs first time)
   if (db) { ensureSuperAdminSeeded(db).catch(() => {}); }
@@ -1030,6 +1193,16 @@ async function handle(request, params) {
     const username = String(body.username || '').trim().toLowerCase();
     const password = String(body.password || '');
     if (!username || !password) return err('اسم المستخدم وكلمة المرور مطلوبان', 400);
+
+    // 🔄 SELF-HEALING: If admin/superadmin user is missing (first login on fresh deploy),
+    // run the seeder synchronously to ensure default accounts exist before checking credentials.
+    if (['admin', 'superadmin'].includes(username)) {
+      const exists = await db.collection('users').findOne({ username });
+      if (!exists) {
+        console.log(`[auth] First-time login for ${username} — running seed...`);
+        await ensureSuperAdminSeeded(db);
+      }
+    }
 
     // Brute force check: count failed attempts in last 15 minutes from this IP+username
     const since = new Date(Date.now() - LOCK_WINDOW_MS).toISOString();
@@ -2464,12 +2637,18 @@ async function handle(request, params) {
   }
   if (path === 'admin/login' && method === 'POST') {
     const { username, password } = await getJsonBody(request);
-    const s = await db.collection('settings').findOne({}) || {};
+    // 🔄 SELF-HEALING: ensure settings.adminPasswordHash is seeded on fresh deploys
+    let s = await db.collection('settings').findOne({}) || {};
+    if (!s?.security?.adminPasswordHash) {
+      console.log('[admin/login] No admin password set — running seed...');
+      await ensureSuperAdminSeeded(db);
+      s = await db.collection('settings').findOne({}) || {};
+    }
     const u = s?.security?.adminUsername || 'admin';
     const h = s?.security?.adminPasswordHash;
-    // If no admin password is configured yet → accept default fallback admin/admin
+    // If no admin password is configured yet → accept default fallback admin/admin OR admin/admin1982
     if (!h) {
-      if (username === 'admin' && password === 'admin') {
+      if (username === 'admin' && (password === 'admin' || password === 'admin1982')) {
         await logActivity(db, { action: 'admin_login', entity: 'admin', user: 'admin', details: 'دخول بإعدادات افتراضية', ip: clientIp });
         return ok({ success: true, username: 'admin', defaultCredentials: true });
       }
@@ -3569,12 +3748,20 @@ async function handle(request, params) {
   // ============ HR / EMPLOYEE ENDPOINTS ============
   if (path === 'employees/login' && method === 'POST') {
     const { username, password } = await getJsonBody(request);
+    // 🔄 SELF-HEALING: ensure admin employee exists on fresh deploys
+    if (username === 'admin') {
+      const exists = await db.collection('employees').findOne({ username: 'admin' });
+      if (!exists) {
+        console.log('[employees/login] admin employee not found — running seed...');
+        await ensureSuperAdminSeeded(db);
+      }
+    }
     const emp = await db.collection('employees').findOne({ username });
     if (!emp) {
       await logActivity(db, { action: 'login_failed', entity: 'employees', user: username, details: 'username not found', ip: clientIp });
       return err('بيانات الدخول خاطئة', 401);
     }
-    const ok2 = await verifyPassword(password, emp.password);
+    const ok2 = await verifyPassword(password, emp.passwordHash || emp.password);
     if (!ok2) {
       await logActivity(db, { action: 'login_failed', entity: 'employees', user: username, userId: emp.id, details: 'wrong password', ip: clientIp });
       return err('بيانات الدخول خاطئة', 401);
@@ -3582,7 +3769,7 @@ async function handle(request, params) {
     // Upgrade legacy plaintext to bcrypt on successful login
     if (!isBcrypt(emp.password)) {
       const newHash = await hashPassword(password);
-      await db.collection('employees').updateOne({ id: emp.id }, { $set: { password: newHash } });
+      await db.collection('employees').updateOne({ id: emp.id }, { $set: { password: newHash, passwordHash: newHash } });
     }
     delete emp._id;
     const token = `emp_${emp.id}_${Date.now()}`;
@@ -3593,6 +3780,7 @@ async function handle(request, params) {
     });
     await logActivity(db, { action: 'login_success', entity: 'employees', user: emp.name, userId: emp.id, details: 'تسجيل دخول ناجح', ip: clientIp });
     delete emp.password;
+    delete emp.passwordHash;
     return ok({ success: true, employee: emp, token });
   }
 
