@@ -30,7 +30,7 @@ import {
   Wifi, MapPin, Activity, AlertTriangle, TrendingUp, DollarSign, Zap,
   Send, Bot, Menu, Bell, ChevronLeft, ChevronRight, Box, CreditCard, FileText, X,
   CheckCircle2, Clock, AlertCircle, Globe, Smartphone, Headphones,
-  HardDrive, Plug, Battery, ScanLine, Receipt, ShoppingBag, UserCheck, Crown,
+  HardDrive, Plug, Battery, ScanLine, Receipt, ShoppingBag, UserCheck, Crown, Gift, Truck,
   Building2, BarChart, PieChart as PieIcon, Boxes, ChevronDown, Printer, ListTodo, Check, XCircle, LogOut, MessageSquare, QrCode, Power, RefreshCw, Wallet, Brain
 } from 'lucide-react';
 import AdminLayoutClient from '@/components/admin-layout-client';
@@ -47,6 +47,10 @@ import TasksManager from '@/components/admin/tasks-manager';
 import Agents from '@/components/admin/agents';
 import MobileAppPage from '@/components/admin/mobile-app';
 import CRMPage from '@/components/admin/crm';
+import BulkBarcodePrintPage from '@/components/admin/bulk-barcode-print';
+import CouponsPage from '@/components/admin/coupons';
+import SuppliersPage from '@/components/admin/suppliers';
+import PushNotificationsPage from '@/components/admin/push-notifications';
 import { ColumnHeader } from '@/components/admin/shared/ColumnHeader';
 import { TaskAdvancedActions } from '@/components/admin/shared/TaskAdvancedActions';
 import { Field } from '@/components/admin/shared/Field';
@@ -111,6 +115,7 @@ const MENU = [
       { id: 'pos', label: 'POS نقطة البيع', icon: ShoppingCart },
       { id: 'pos-reports', label: 'الإدارة / تقارير POS', icon: BarChart3 },
       { id: 'products', label: 'المنتجات والمخزون', icon: Package },
+      { id: 'bulk-barcodes', label: 'طباعة باركودات مجمَّعة', icon: Printer },
     ]
   },
   {
@@ -129,16 +134,19 @@ const MENU = [
   { id: 'repairs', label: 'صيانة الهواتف', icon: Wrench, color: 'gold' },
   { id: 'cameras', label: 'الكاميرات', icon: Camera, color: 'gold' },
   { id: 'employees', label: 'الموظفون', icon: Users, color: 'gold' },
+  { id: 'suppliers', label: 'الموردون والمشتريات', icon: Truck, color: 'gold' },
   { id: 'crm', label: 'CRM إدارة العملاء', icon: Crown, color: 'gold' },
   { id: 'tasks', label: 'المهام', icon: ListTodo, color: 'neon' },
   { id: 'reports', label: 'التقارير والتحليلات', icon: BarChart3, color: 'neon' },
   { id: 'ai', label: 'المساعد الذكي AI', icon: Sparkles, color: 'gold' },
   { id: 'tg-bot', label: 'بوت الإحصائيات (تليجرام)', icon: Send, color: 'neon' },
   { id: 'orders', label: 'المتجر والطلبات', icon: ShoppingCart, color: 'gold' },
+  { id: 'coupons', label: 'الكوبونات والعروض', icon: Gift, color: 'gold' },
   { id: 'location-requests', label: 'طلبات تعديل المواقع', icon: MapPin, color: 'neon' },
   { id: 'accounting', label: 'المحاسبة المالية', icon: CreditCard, color: 'gold' },
   { id: 'balance', label: 'إدارة الرصيد (Fast/Master)', icon: Wallet, color: 'gold' },
   { id: 'activity', label: 'سجل النشاطات والجلسات', icon: Activity, color: 'rose' },
+  { id: 'push-notifications', label: 'الإشعارات الفورية', icon: Bell, color: 'rose' },
   { id: 'mobile-app', label: 'تطبيق الموبايل (APK)', icon: Smartphone, color: 'neon' },
   { id: 'settings', label: 'الإعدادات', icon: Settings, color: 'neon' },
 ];
@@ -221,6 +229,7 @@ function App() {
           {active === 'pos' && <POS />}
           {active === 'pos-reports' && <POSManagerReports />}
           {active === 'products' && <Products />}
+          {active === 'bulk-barcodes' && <BulkBarcodePrintPage />}
           {active === 'subscribers' && <Subscribers />}
           {active === 'activations' && <ActivationsLog />}
           {active === 'agents' && <Agents />}
@@ -233,16 +242,19 @@ function App() {
           {active === 'cameras' && <Cameras />}
           {active === 'employees' && <Employees />}
           {active === 'crm' && <CRMPage />}
+          {active === 'suppliers' && <SuppliersPage />}
           {active === 'reports' && <Reports />}
           {active === 'tasks' && <TasksManager />}
           {active === 'ai' && <AIAssistant />}
           {active === 'tg-bot' && <TelegramBotPage />}
           {active === 'orders' && <OrdersAdminPage />}
+          {active === 'coupons' && <CouponsPage />}
           {active === 'location-requests' && <LocationRequestsPage />}
           {active === 'accounting' && <AccountingPage />}
           {active === 'balance' && <BalanceManagement api={api} />}
           {active === 'activity' && <ActivityLogsPage />}
           {active === 'mobile-app' && <MobileAppPage />}
+          {active === 'push-notifications' && <PushNotificationsPage />}
           {active === 'settings' && <SettingsPage />}
         </main>
       </div>

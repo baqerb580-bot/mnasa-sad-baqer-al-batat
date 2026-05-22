@@ -176,6 +176,106 @@ export default function WhatsAppManager({ api }) {
     setTplText(defaults[activeTpl] || '');
   };
 
+  // Add new custom template (e.g., holiday, birthday, custom event)
+  const addCustomTemplate = async () => {
+    const key = prompt('🆕 مفتاح القالب الجديد (بالإنجليزية، بدون مسافات):\nمثل: eid_greeting, birthday, new_year, ramadan');
+    if (!key) return;
+    const cleanKey = key.trim().toLowerCase().replace(/[^a-z0-9_]/g, '_');
+    if (!cleanKey) { toast.error('مفتاح غير صحيح'); return; }
+    if (templates[cleanKey] !== undefined || defaults[cleanKey] !== undefined) {
+      toast.error('هذا المفتاح موجود مسبقاً');
+      return;
+    }
+    const label = prompt('🏷️ اسم القالب للعرض (اختياري، بالعربية):') || cleanKey;
+    const next = { ...templates, [cleanKey]: `🎉 *مرحباً {name}*\n\n[اكتب نص الرسالة هنا]\n\n*${label}*` };
+    const r = await api('whatsapp/templates', { method: 'PUT', body: JSON.stringify({ templates: next }) });
+    if (r?.success) {
+      setTemplates(next);
+      setActiveTpl(cleanKey);
+      toast.success(`✅ تم إضافة القالب "${label}"`);
+    } else toast.error('فشل');
+  };
+
+  // Holiday preset templates (one-click add)
+  const HOLIDAY_PRESETS = {
+    eid_fitr: {
+      label: '🌙 عيد الفطر',
+      text: `🌙 *عيد فطر مبارك* 🌙\n\nعزيزي *{name}*،\n\nيتشرف *مركز الغزلان* بتقديم أجمل التهاني بمناسبة عيد الفطر المبارك\n🎊 كل عام وأنتم بألف خير\n🤲 تقبل الله منا ومنكم صالح الأعمال\n\nمع تحيات: *مركز الغزلان*\n📞 {companyPhone}`,
+    },
+    eid_adha: {
+      label: '🐑 عيد الأضحى',
+      text: `🐑 *عيد أضحى مبارك* 🐑\n\nعزيزي *{name}*،\n\nأطيب التهاني بمناسبة عيد الأضحى المبارك\n🎊 كل عام وأنتم بخير\n🤲 تقبل الله منا ومنكم\n\n*مركز الغزلان*\n📞 {companyPhone}`,
+    },
+    new_year: {
+      label: '🎆 السنة الجديدة',
+      text: `🎆 *سنة جديدة سعيدة* 🎆\n\nعزيزي *{name}*،\n\nمع بداية عام جديد، نقدم لك أصدق التهاني والتمنيات بسنة مليئة بالنجاح والتوفيق ✨\n\nشكراً لثقتك بنا 🙏\n\n*مركز الغزلان* 🌟\n📞 {companyPhone}`,
+    },
+    ramadan: {
+      label: '🌙 رمضان كريم',
+      text: `🌙 *رمضان كريم* 🌙\n\nعزيزي *{name}*،\n\nيتقدم *مركز الغزلان* بأجمل التهاني بحلول شهر رمضان المبارك\n🤲 أعاده الله علينا وعليكم بالخير واليمن والبركات\n\nأوقات العمل في رمضان:\n⏰ 9 صباحاً - 3 ظهراً\n⏰ 8 مساءً - 12 منتصف الليل\n\n*مركز الغزلان* 🌟`,
+    },
+    birthday: {
+      label: '🎂 عيد ميلاد',
+      text: `🎂 *كل عام وأنت بخير* 🎂\n\nعزيزي *{name}*،\n\nيسعدنا في *مركز الغزلان* أن نهنئك بمناسبة عيد ميلادك 🎉\n🎁 لك خصم خاص 10% على أي خدمة هذا الشهر\n\n*مركز الغزلان* 🌟\n📞 {companyPhone}`,
+    },
+    promo: {
+      label: '🎁 عرض خاص',
+      text: `🎁 *عرض حصري لك* 🎁\n\nعزيزي *{name}*،\n\nيسعدنا تقديم عرض خاص:\n✨ [اكتب تفاصيل العرض هنا]\n📅 العرض ساري حتى: [تاريخ]\n\nللحجز والاستفسار:\n📞 {companyPhone}\n\n*مركز الغزلان*`,
+    },
+    follow_up: {
+      label: '📞 متابعة',
+      text: `مرحباً *{name}* 👋\n\nنود الاطمئنان عليك ومتابعة جودة خدمتنا معك.\n\nهل لديك أي ملاحظات أو استفسار؟ نحن هنا لخدمتك ✨\n\n*مركز الغزلان*\n📞 {companyPhone}`,
+    },
+    apology: {
+      label: '🙏 اعتذار',
+      text: `*اعتذار* 🙏\n\nعزيزي *{name}*،\n\nنعتذر عن الإزعاج الذي قد تواجهه بسبب [سبب الانقطاع].\n\n🛠️ فريقنا الفني يعمل على حل المشكلة بأسرع وقت ممكن.\n📅 الموعد المتوقع للإصلاح: [وقت]\n\nشكراً لتفهمك 🌟\n*مركز الغزلان*`,
+    },
+  };
+
+  const addHolidayPreset = async (presetKey) => {
+    const preset = HOLIDAY_PRESETS[presetKey];
+    if (!preset) return;
+    if (templates[presetKey] !== undefined) {
+      if (!confirm(`القالب "${preset.label}" موجود — استبداله بالنسخة الافتراضية؟`)) return;
+    }
+    const next = { ...templates, [presetKey]: preset.text };
+    const r = await api('whatsapp/templates', { method: 'PUT', body: JSON.stringify({ templates: next }) });
+    if (r?.success) {
+      setTemplates(next);
+      setActiveTpl(presetKey);
+      toast.success(`✅ تم إضافة قالب "${preset.label}"`);
+    } else toast.error('فشل');
+  };
+
+  const deleteCustomTemplate = async () => {
+    if (defaults[activeTpl] !== undefined) {
+      toast.error('لا يمكن حذف القوالب الافتراضية. اضغط "استعادة الافتراضي" بدلاً من ذلك.');
+      return;
+    }
+    if (!confirm(`حذف القالب "${activeTpl}" نهائياً؟`)) return;
+    const next = { ...templates };
+    delete next[activeTpl];
+    const r = await api('whatsapp/templates', { method: 'PUT', body: JSON.stringify({ templates: next }) });
+    if (r?.success) {
+      setTemplates(next);
+      setActiveTpl('activation');
+      toast.success('🗑️ تم حذف القالب');
+    } else toast.error('فشل');
+  };
+
+  // Live preview with sample data
+  const previewText = (() => {
+    const sampleVars = {
+      name: 'محمد علي', username: 'mohammed123', package: 'باقة الذهبية',
+      speed: '50 Mbps', amount: '50,000', paid: '40,000', remaining: '10,000',
+      debt: '15,000', endDate: '2026-06-30', startDate: '2026-06-01',
+      daysLeft: '5', receiptNo: 'REC-2026-1234', office: 'الفرع الرئيسي',
+      companyName: 'مركز الغزلان', companyPhone: '07707889032',
+    };
+    return String(tplText || '').replace(/\{(\w+)\}/g, (_, k) => sampleVars[k] ?? `{${k}}`);
+  })();
+
+
   const sendBulk = async () => {
     if (!bulk.templateKey && !bulk.message?.trim()) {
       toast.error('اختر قالباً أو اكتب رسالة');
@@ -374,26 +474,81 @@ export default function WhatsAppManager({ api }) {
         <TabsContent value="templates">
           <Card className="glass-strong border-gold-soft">
             <CardContent className="p-4 space-y-3">
-              <div className="flex flex-wrap gap-2">
-                {Object.keys(defaults).map(k => (
-                  <Button
-                    key={k}
-                    size="sm"
-                    variant={activeTpl === k ? 'default' : 'outline'}
-                    onClick={() => setActiveTpl(k)}
-                    className={activeTpl === k ? 'btn-gold' : 'border-gold/30'}
-                  >
-                    {({activation:'تفعيل',expiry:'انتهاء',expiry_alert:'تنبيه قبل الانتهاء',debt:'دين',receipt:'وصل',generic:'عام'})[k] || k}
-                  </Button>
-                ))}
+              {/* Holiday preset suggestions (one-click add) */}
+              <div className="p-3 rounded-lg bg-purple-500/5 border border-purple-500/20">
+                <p className="text-xs font-bold text-purple-400 mb-2 flex items-center gap-1">
+                  ✨ قوالب جاهزة — اضغط لإضافتها:
+                </p>
+                <div className="flex flex-wrap gap-1.5">
+                  {Object.entries(HOLIDAY_PRESETS).map(([key, p]) => (
+                    <Button
+                      key={key}
+                      size="sm"
+                      variant="outline"
+                      onClick={() => addHolidayPreset(key)}
+                      className={`text-[10px] h-7 ${templates[key] !== undefined ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400' : 'border-purple-500/30 hover:bg-purple-500/10'}`}
+                      title={templates[key] !== undefined ? 'مُضاف بالفعل' : 'إضافة'}
+                    >
+                      {templates[key] !== undefined && '✓ '}{p.label}
+                    </Button>
+                  ))}
+                </div>
               </div>
+
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <div className="flex flex-wrap gap-2">
+                  {Object.keys({ ...defaults, ...templates }).map(k => {
+                    const isCustom = defaults[k] === undefined;
+                    const presetLabel = HOLIDAY_PRESETS[k]?.label;
+                    return (
+                      <Button
+                        key={k}
+                        size="sm"
+                        variant={activeTpl === k ? 'default' : 'outline'}
+                        onClick={() => setActiveTpl(k)}
+                        className={activeTpl === k ? 'btn-gold' : isCustom ? 'border-cyan-500/30' : 'border-gold/30'}
+                      >
+                        {presetLabel || ({activation:'تفعيل',expiry:'انتهاء',expiry_alert:'تنبيه قبل الانتهاء',debt:'دين',receipt:'وصل',generic:'عام'})[k] || k}
+                        {isCustom && !presetLabel && <Badge variant="outline" className="mr-1 text-[8px] border-cyan-400/40 text-cyan-400">مخصص</Badge>}
+                      </Button>
+                    );
+                  })}
+                </div>
+                <Button size="sm" onClick={addCustomTemplate} variant="outline" className="border-cyan-500/30 text-cyan-400 hover:bg-cyan-500/10">
+                  ➕ قالب مخصص جديد
+                </Button>
+              </div>
+
               <p className="text-[10px] text-muted-foreground">
                 المتغيرات المتاحة: <code className="bg-input/30 px-1 rounded">{'{name}'}</code> <code className="bg-input/30 px-1 rounded">{'{username}'}</code> <code className="bg-input/30 px-1 rounded">{'{package}'}</code> <code className="bg-input/30 px-1 rounded">{'{speed}'}</code> <code className="bg-input/30 px-1 rounded">{'{amount}'}</code> <code className="bg-input/30 px-1 rounded">{'{paid}'}</code> <code className="bg-input/30 px-1 rounded">{'{remaining}'}</code> <code className="bg-input/30 px-1 rounded">{'{debt}'}</code> <code className="bg-input/30 px-1 rounded">{'{endDate}'}</code> <code className="bg-input/30 px-1 rounded">{'{startDate}'}</code> <code className="bg-input/30 px-1 rounded">{'{daysLeft}'}</code> <code className="bg-input/30 px-1 rounded">{'{receiptNo}'}</code> <code className="bg-input/30 px-1 rounded">{'{office}'}</code> <code className="bg-input/30 px-1 rounded">{'{companyName}'}</code> <code className="bg-input/30 px-1 rounded">{'{companyPhone}'}</code>
               </p>
-              <Textarea value={tplText} onChange={e => setTplText(e.target.value)} rows={14} className="bg-input/30 border-gold/20 font-mono text-xs" dir="rtl" />
-              <div className="flex gap-2">
+
+              {/* Side-by-side: Editor + Live Preview */}
+              <div className="grid md:grid-cols-2 gap-3">
+                <div>
+                  <Label className="text-xs flex items-center gap-1 mb-1">
+                    <FileText className="w-3 h-3" /> المُحرر
+                  </Label>
+                  <Textarea value={tplText} onChange={e => setTplText(e.target.value)} rows={14} className="bg-input/30 border-gold/20 font-mono text-xs" dir="rtl" />
+                </div>
+                <div>
+                  <Label className="text-xs flex items-center gap-1 mb-1 text-emerald-400">
+                    <MessageSquare className="w-3 h-3" /> معاينة مباشرة (بيانات تجريبية)
+                  </Label>
+                  <div className="bg-emerald-500/5 border border-emerald-500/20 rounded-md p-3 h-[calc(14*1.5em+1rem)] overflow-y-auto" dir="rtl">
+                    <p className="whitespace-pre-line text-xs leading-relaxed text-foreground/90">{previewText}</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex gap-2 flex-wrap">
                 <Button onClick={saveTemplate} disabled={savingTpl} className="btn-gold"><Save className="w-4 h-4 ml-1" /> حفظ القالب</Button>
                 <Button onClick={resetTemplate} variant="outline" className="border-gold/30">استعادة الافتراضي</Button>
+                {defaults[activeTpl] === undefined && (
+                  <Button onClick={deleteCustomTemplate} variant="outline" className="border-red-500/30 text-red-400 hover:bg-red-500/10">
+                    <Trash2 className="w-4 h-4 ml-1" /> حذف هذا القالب
+                  </Button>
+                )}
               </div>
             </CardContent>
           </Card>

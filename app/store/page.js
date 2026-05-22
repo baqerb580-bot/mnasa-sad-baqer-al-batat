@@ -110,17 +110,45 @@ function Store() {
 
   const subtotal = cart.reduce((s, x) => s + x.price * x.quantity, 0);
   const shipping = subtotal >= 50000 ? 0 : 5000;
-  const total = subtotal + shipping;
+  const [couponCode, setCouponCode] = useState('');
+  const [appliedCoupon, setAppliedCoupon] = useState(null);
+  const [validating, setValidating] = useState(false);
+  const couponDiscount = appliedCoupon?.discount || 0;
+  const total = Math.max(0, subtotal + shipping - couponDiscount);
+
+  const applyCoupon = async () => {
+    if (!couponCode.trim()) return;
+    setValidating(true);
+    try {
+      const r = await api('coupons/validate', { method: 'POST', body: JSON.stringify({ code: couponCode.trim(), orderTotal: subtotal }) });
+      if (r?.valid) {
+        setAppliedCoupon({ code: r.coupon.code, discount: r.discount, description: r.coupon.description });
+        toast.success(`🎁 تم تطبيق الكوبون: خصم ${r.discount.toLocaleString('en-US')} د.ع`);
+      } else {
+        toast.error(r?.error || 'كوبون غير صالح');
+        setAppliedCoupon(null);
+      }
+    } finally { setValidating(false); }
+  };
+
+  const removeCoupon = () => {
+    setAppliedCoupon(null);
+    setCouponCode('');
+    toast.info('تم إزالة الكوبون');
+  };
 
   const placeOrder = async () => {
     if (!form.customerName || !form.customerPhone) { toast.error('الاسم ورقم الهاتف مطلوبان'); return; }
     if (cart.length === 0) { toast.error('السلة فارغة'); return; }
-    const r = await api('orders', { method: 'POST', body: JSON.stringify({ ...form, items: cart }) });
+    const payload = { ...form, items: cart };
+    if (appliedCoupon) payload.couponCode = appliedCoupon.code;
+    const r = await api('orders', { method: 'POST', body: JSON.stringify(payload) });
     if (r.error) toast.error(r.error);
     else {
       setOrderSuccess(r);
       setCart([]); setCheckoutOpen(false); setCartOpen(false);
       setForm({ customerName: '', customerPhone: '', customerAddress: '', paymentMethod: 'cod', notes: '' });
+      setAppliedCoupon(null); setCouponCode('');
       try { localStorage.removeItem('store_cart'); } catch {}
     }
   };
@@ -410,9 +438,37 @@ function Store() {
             </div>
           )}
           {cart.length > 0 && (
-            <div className="border-t border-gold-soft pt-3 space-y-1 text-xs">
+            <div className="border-t border-gold-soft pt-3 space-y-2 text-xs">
+              {/* Coupon input */}
+              <div className="p-2 rounded-lg bg-emerald-500/5 border border-emerald-500/20">
+                {!appliedCoupon ? (
+                  <div className="flex gap-2 items-center">
+                    <Input
+                      value={couponCode}
+                      onChange={e => setCouponCode(e.target.value.toUpperCase())}
+                      placeholder="🎟️ كود الكوبون"
+                      className="bg-input/30 border-emerald-500/30 h-8 text-xs font-mono uppercase"
+                    />
+                    <Button onClick={applyCoupon} disabled={validating || !couponCode.trim()} size="sm" className="bg-emerald-500 hover:bg-emerald-600 text-white h-8">
+                      {validating ? '⏳' : 'تطبيق'}
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="text-emerald-400">🎁</span>
+                      <span className="font-mono font-bold text-emerald-400">{appliedCoupon.code}</span>
+                      <span className="text-[10px] text-emerald-300">— خصم {fmt(appliedCoupon.discount)} د.ع</span>
+                    </div>
+                    <Button onClick={removeCoupon} size="sm" variant="ghost" className="h-6 text-red-400 hover:bg-red-500/10 text-[10px]">إزالة</Button>
+                  </div>
+                )}
+              </div>
               <div className="flex justify-between"><span>المجموع الفرعي</span><span className="font-bold">{fmt(subtotal)} د.ع</span></div>
               <div className="flex justify-between"><span>الشحن</span><span className="font-bold">{shipping === 0 ? '🎉 مجاني' : `${fmt(shipping)} د.ع`}</span></div>
+              {couponDiscount > 0 && (
+                <div className="flex justify-between text-emerald-400"><span>خصم الكوبون</span><span className="font-bold">- {fmt(couponDiscount)} د.ع</span></div>
+              )}
               <div className="flex justify-between text-base font-black gold-text"><span>الإجمالي</span><span>{fmt(total)} د.ع</span></div>
             </div>
           )}

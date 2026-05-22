@@ -3358,12 +3358,27 @@ async function handle(request, params) {
     }
     if (cleanItems.length === 0) return err('لا توجد منتجات صالحة', 400);
     const shipping = subtotal >= 50000 ? 0 : 5000;
-    const total = subtotal + shipping;
+    // ===== COUPON SUPPORT =====
+    let couponDiscount = 0;
+    let appliedCoupon = null;
+    if (body.couponCode) {
+      const code = String(body.couponCode).toUpperCase().trim();
+      const c = await db.collection('coupons').findOne({ code });
+      if (c && c.active && (!c.expiresAt || new Date(c.expiresAt) > new Date()) && (c.maxUses === 0 || c.usedCount < c.maxUses) && subtotal >= (c.minOrder || 0)) {
+        if (c.type === 'percent') couponDiscount = Math.round(subtotal * c.value / 100);
+        else couponDiscount = Math.min(c.value, subtotal);
+        appliedCoupon = { id: c.id, code: c.code, type: c.type, value: c.value, discount: couponDiscount };
+        await db.collection('coupons').updateOne({ id: c.id }, { $inc: { usedCount: 1 } });
+      }
+    }
+    const total = Math.max(0, subtotal + shipping - couponDiscount);
     const orderNumber = `ORD-${Date.now()}`;
     const doc = {
       id: uuidv4(), orderNumber,
       customerName, customerPhone, customerAddress: customerAddress || '',
-      items: cleanItems, subtotal, shipping, total,
+      items: cleanItems, subtotal, shipping,
+      coupon: appliedCoupon, couponDiscount,
+      total,
       paymentMethod: paymentMethod || 'cod', notes: notes || '',
       status: 'pending', createdAt: new Date().toISOString(),
     };
@@ -5732,6 +5747,7 @@ async function handle(request, params) {
       const highUtil = safeZones.filter(z => (Number(z?.utilization) || 0) > 85);
       if (highUtil.length > 0) {
         insights.push({ type: 'warning', icon: '⚡', title: 'ضغط عالي على الشبكة', message: `${highUtil.length} زون يحتاج توسعة: ${highUtil.map(z => `${z?.name || '—'} (${z?.utilization || 0}%)`).join('، ')}` });
+
       }
       const deadStock = safeProducts.filter(p => (Number(p?.stock) || 0) > 50);
       if (deadStock.length > 0) {
@@ -5746,6 +5762,279 @@ async function handle(request, params) {
       return ok({ insights: [] });
     }
   }
+
+  // ============ SUPPLIERS & PURCHASES ============
+  // ----- Suppliers CRUD -----
+  if (path === 'suppliers' && method === 'GET') {
+    try {
+      const list = await db.collection('suppliers').find({}).sort({ createdAt: -1 }).toArray();
+      return ok(list.map(s => { delete s._id; return s; }));
+    } catch (e) { return ok([]); }
+  }
+
+  if (path === 'suppliers' && method === 'POST') {
+    try {
+      const body = await getJsonBody(request);
+      if (!body.name) return err('الاسم مطلوب', 400);
+      const doc = {
+        id: uuidv4(),
+        name: body.name,
+        phone: body.phone || '',
+        email: body.email || '',
+        address: body.address || '',
+        contactPerson: body.contactPerson || '',
+        category: body.category || 'عام',
+        paymentTerms: body.paymentTerms || 'نقدي',
+        notes: body.notes || '',
+        balance: Number(body.balance || 0), // positive = we owe them
+        active: body.active !== false,
+        createdAt: new Date().toISOString(),
+      };
+      await db.collection('suppliers').insertOne(doc);
+      delete doc._id;
+      await logActivity(db, { action: 'supplier_created', entity: 'suppliers', entityId: doc.id, details: `إضافة مورد: ${doc.name}`, ip: clientIp });
+      return ok(doc, 201);
+    } catch (e) { return err(e.message, 500); }
+  }
+
+  if (path.match(/^suppliers\/[^/]+$/) && method === 'PUT') {
+    try {
+      const id = path.split('/')[1];
+      const body = await getJsonBody(request);
+      const update = {};
+      ['name','phone','email','address','contactPerson','category','paymentTerms','notes','balance','active'].forEach(k => {
+        if (body[k] !== undefined) update[k] = body[k];
+      });
+      update.updatedAt = new Date().toISOString();
+      await db.collection('suppliers').updateOne({ id }, { $set: update });
+      return ok({ success: true });
+    } catch (e) { return err(e.message, 500); }
+  }
+
+  if (path.match(/^suppliers\/[^/]+$/) && method === 'DELETE') {
+    try {
+      const id = path.split('/')[1];
+      // Check no purchase orders linked
+      const linked = await db.collection('purchase_orders').countDocuments({ supplierId: id });
+      if (linked > 0) return err(`لا يمكن الحذف — يوجد ${linked} فاتورة شراء مرتبطة`, 400);
+      await db.collection('suppliers').deleteOne({ id });
+      return ok({ success: true });
+    } catch (e) { return err(e.message, 500); }
+  }
+
+  // ----- Purchase Orders (PO) -----
+  if (path === 'purchase-orders' && method === 'GET') {
+    try {
+      const list = await db.collection('purchase_orders').find({}).sort({ createdAt: -1 }).toArray();
+      return ok(list.map(s => { delete s._id; return s; }));
+    } catch (e) { return ok([]); }
+  }
+
+  if (path === 'purchase-orders' && method === 'POST') {
+    try {
+      const body = await getJsonBody(request);
+      if (!body.supplierId) return err('اختر مورد', 400);
+      const supplier = await db.collection('suppliers').findOne({ id: body.supplierId });
+      if (!supplier) return err('المورد غير موجود', 404);
+      const items = Array.isArray(body.items) ? body.items.filter(i => i.productId || i.name).map(i => ({
+        productId: i.productId || null,
+        name: i.name,
+        quantity: Number(i.quantity || 1),
+        cost: Number(i.cost || 0),
+        total: Number(i.quantity || 1) * Number(i.cost || 0),
+      })) : [];
+      if (items.length === 0) return err('أضف منتج واحد على الأقل', 400);
+      const subtotal = items.reduce((s, x) => s + x.total, 0);
+      const tax = Number(body.tax || 0);
+      const discount = Number(body.discount || 0);
+      const total = Math.max(0, subtotal + tax - discount);
+      const paid = Number(body.paid || 0);
+      const remaining = Math.max(0, total - paid);
+
+      const poNumber = `PO-${Date.now()}`;
+      const doc = {
+        id: uuidv4(),
+        poNumber,
+        supplierId: supplier.id,
+        supplierName: supplier.name,
+        items, subtotal, tax, discount, total, paid, remaining,
+        paymentMethod: body.paymentMethod || 'cash',
+        status: remaining === 0 ? 'paid' : paid > 0 ? 'partial' : 'unpaid',
+        notes: body.notes || '',
+        receivedAt: body.receivedAt || new Date().toISOString(),
+        createdAt: new Date().toISOString(),
+        createdBy: body.createdBy || 'admin',
+      };
+      await db.collection('purchase_orders').insertOne(doc);
+      delete doc._id;
+
+      // Update supplier balance (debt)
+      if (remaining > 0) {
+        await db.collection('suppliers').updateOne(
+          { id: supplier.id },
+          { $inc: { balance: remaining } }
+        );
+      }
+
+      // Update product stock if linked
+      if (body.updateStock !== false) {
+        for (const it of items) {
+          if (it.productId) {
+            await db.collection('products').updateOne(
+              { id: it.productId },
+              { $inc: { stock: it.quantity }, $set: { lastCost: it.cost } }
+            );
+          }
+        }
+      }
+
+      await logActivity(db, { action: 'purchase_order_created', entity: 'purchase_orders', entityId: doc.id, details: `فاتورة شراء ${poNumber} من ${supplier.name}: ${total.toLocaleString('en-US')} د.ع`, ip: clientIp });
+      return ok(doc, 201);
+    } catch (e) {
+      console.error('[purchase-orders POST]', e?.stack);
+      return err(e.message, 500);
+    }
+  }
+
+  // Pay supplier (decrease balance)
+  if (path.match(/^suppliers\/[^/]+\/pay$/) && method === 'POST') {
+    try {
+      const id = path.split('/')[1];
+      const body = await getJsonBody(request);
+      const amount = Number(body.amount || 0);
+      if (amount <= 0) return err('المبلغ غير صحيح', 400);
+      const supplier = await db.collection('suppliers').findOne({ id });
+      if (!supplier) return err('المورد غير موجود', 404);
+      await db.collection('suppliers').updateOne({ id }, { $inc: { balance: -amount } });
+      const payment = {
+        id: uuidv4(),
+        supplierId: id,
+        supplierName: supplier.name,
+        amount,
+        paymentMethod: body.paymentMethod || 'cash',
+        notes: body.notes || '',
+        createdAt: new Date().toISOString(),
+        createdBy: body.createdBy || 'admin',
+      };
+      await db.collection('supplier_payments').insertOne(payment);
+      delete payment._id;
+      await logActivity(db, { action: 'supplier_payment', entity: 'suppliers', entityId: id, details: `تسديد ${amount.toLocaleString('en-US')} د.ع للمورد ${supplier.name}`, ip: clientIp });
+      return ok({ success: true, payment, newBalance: (supplier.balance || 0) - amount });
+    } catch (e) { return err(e.message, 500); }
+  }
+
+  // Supplier statement (POs + payments)
+  if (path.match(/^suppliers\/[^/]+\/statement$/) && method === 'GET') {
+    try {
+      const id = path.split('/')[1];
+      const supplier = await db.collection('suppliers').findOne({ id });
+      if (!supplier) return err('المورد غير موجود', 404);
+      const [pos, payments] = await Promise.all([
+        db.collection('purchase_orders').find({ supplierId: id }).sort({ createdAt: -1 }).toArray(),
+        db.collection('supplier_payments').find({ supplierId: id }).sort({ createdAt: -1 }).toArray(),
+      ]);
+      const totalPurchased = pos.reduce((s, p) => s + (p.total || 0), 0);
+      const totalPaid = payments.reduce((s, p) => s + (p.amount || 0), 0) + pos.reduce((s, p) => s + (p.paid || 0), 0);
+      delete supplier._id;
+      return ok({
+        supplier,
+        pos: pos.map(p => { delete p._id; return p; }),
+        payments: payments.map(p => { delete p._id; return p; }),
+        totalPurchased,
+        totalPaid,
+        currentBalance: supplier.balance || 0,
+      });
+    } catch (e) { return err(e.message, 500); }
+  }
+
+
+  // ============ COUPONS & OFFERS ============
+  if (path === 'coupons' && method === 'GET') {
+    try {
+      const coupons = await db.collection('coupons').find({}).sort({ createdAt: -1 }).toArray();
+      const cleaned = coupons.map(c => { delete c._id; return c; });
+      return ok(cleaned);
+    } catch (e) { return ok([]); }
+  }
+
+  if (path === 'coupons' && method === 'POST') {
+    try {
+      const body = await getJsonBody(request);
+      const code = String(body.code || '').toUpperCase().trim();
+      if (!code) return err('كود الكوبون مطلوب', 400);
+      if (!body.type || !['percent', 'fixed'].includes(body.type)) return err('نوع غير صحيح (percent/fixed)', 400);
+      const value = Number(body.value);
+      if (isNaN(value) || value <= 0) return err('قيمة غير صحيحة', 400);
+      const existing = await db.collection('coupons').findOne({ code });
+      if (existing) return err('كود الكوبون موجود مسبقاً', 400);
+      const doc = {
+        id: uuidv4(),
+        code,
+        type: body.type,
+        value,
+        minOrder: Number(body.minOrder || 0),
+        maxUses: Number(body.maxUses || 0),  // 0 = unlimited
+        usedCount: 0,
+        expiresAt: body.expiresAt || null,
+        description: body.description || '',
+        active: body.active !== false,
+        createdAt: new Date().toISOString(),
+      };
+      await db.collection('coupons').insertOne(doc);
+      delete doc._id;
+      await logActivity(db, { action: 'coupon_created', entity: 'coupons', entityId: doc.id, details: `إنشاء كوبون ${code}: ${value}${doc.type === 'percent' ? '%' : ' د.ع'}`, ip: clientIp });
+      return ok(doc, 201);
+    } catch (e) { return err(e.message, 500); }
+  }
+
+  if (path.match(/^coupons\/[^/]+$/) && method === 'PUT') {
+    try {
+      const id = path.split('/')[1];
+      const body = await getJsonBody(request);
+      const update = {};
+      ['active', 'description', 'minOrder', 'maxUses', 'value', 'expiresAt'].forEach(k => {
+        if (body[k] !== undefined) update[k] = body[k];
+      });
+      update.updatedAt = new Date().toISOString();
+      await db.collection('coupons').updateOne({ id }, { $set: update });
+      return ok({ success: true });
+    } catch (e) { return err(e.message, 500); }
+  }
+
+  if (path.match(/^coupons\/[^/]+$/) && method === 'DELETE') {
+    try {
+      const id = path.split('/')[1];
+      await db.collection('coupons').deleteOne({ id });
+      return ok({ success: true });
+    } catch (e) { return err(e.message, 500); }
+  }
+
+  // Validate coupon (used at checkout)
+  if (path === 'coupons/validate' && method === 'POST') {
+    try {
+      const body = await getJsonBody(request);
+      const code = String(body.code || '').toUpperCase().trim();
+      const orderTotal = Number(body.orderTotal || 0);
+      if (!code) return err('كود مطلوب', 400);
+      const c = await db.collection('coupons').findOne({ code });
+      if (!c) return ok({ valid: false, error: 'كوبون غير موجود' });
+      if (!c.active) return ok({ valid: false, error: 'الكوبون غير مفعّل' });
+      if (c.expiresAt && new Date(c.expiresAt) < new Date()) return ok({ valid: false, error: 'الكوبون منتهي الصلاحية' });
+      if (c.maxUses > 0 && c.usedCount >= c.maxUses) return ok({ valid: false, error: 'تم استنفاد عدد استخدامات الكوبون' });
+      if (c.minOrder > 0 && orderTotal < c.minOrder) return ok({ valid: false, error: `الحد الأدنى للطلب: ${c.minOrder.toLocaleString('en-US')} د.ع` });
+      // Calculate discount
+      let discount = 0;
+      if (c.type === 'percent') discount = Math.round(orderTotal * c.value / 100);
+      else discount = Math.min(c.value, orderTotal);
+      return ok({
+        valid: true,
+        coupon: { id: c.id, code: c.code, type: c.type, value: c.value, description: c.description },
+        discount,
+        finalTotal: Math.max(0, orderTotal - discount),
+      });
+    } catch (e) { return err(e.message, 500); }
+  }
+
 
   // ============ CRM (Customer Relationship Management) ============
   // Helper: compute customer stats by enriching subscribers with their purchase history
@@ -5945,6 +6234,149 @@ async function handle(request, params) {
     } catch (e) {
       return err(e.message, 500);
     }
+  }
+
+
+  // ============ PUSH NOTIFICATIONS (Web Push API) ============
+  if (path === 'push/vapid-key' && method === 'GET') {
+    return ok({ publicKey: process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY || process.env.VAPID_PUBLIC_KEY || '' });
+  }
+
+  if (path === 'push/subscribe' && method === 'POST') {
+    try {
+      const body = await getJsonBody(request);
+      const sub = body?.subscription;
+      if (!sub?.endpoint) return err('Subscription invalid', 400);
+      const userId = body?.userId || null;
+      const userAgent = request.headers.get('user-agent') || '';
+      // Upsert by endpoint
+      await db.collection('push_subscriptions').updateOne(
+        { endpoint: sub.endpoint },
+        {
+          $set: {
+            endpoint: sub.endpoint,
+            keys: sub.keys || {},
+            userId,
+            userAgent,
+            label: body?.label || '',
+            tags: Array.isArray(body?.tags) ? body.tags : [],
+            updatedAt: new Date().toISOString(),
+          },
+          $setOnInsert: {
+            id: uuidv4(),
+            createdAt: new Date().toISOString(),
+          },
+        },
+        { upsert: true }
+      );
+      return ok({ success: true });
+    } catch (e) { return err(e.message, 500); }
+  }
+
+  if (path === 'push/unsubscribe' && method === 'POST') {
+    try {
+      const body = await getJsonBody(request);
+      if (body?.endpoint) {
+        await db.collection('push_subscriptions').deleteOne({ endpoint: body.endpoint });
+      }
+      return ok({ success: true });
+    } catch (e) { return err(e.message, 500); }
+  }
+
+  if (path === 'push/subscriptions' && method === 'GET') {
+    try {
+      const list = await db.collection('push_subscriptions').find({}).sort({ createdAt: -1 }).toArray();
+      return ok(list.map(s => {
+        delete s._id;
+        // Don't expose keys/endpoint full
+        return {
+          id: s.id,
+          label: s.label || s.userAgent?.slice(0, 50) || 'متصفح',
+          userId: s.userId,
+          tags: s.tags || [],
+          userAgent: s.userAgent,
+          createdAt: s.createdAt,
+        };
+      }));
+    } catch (e) { return ok([]); }
+  }
+
+  if (path === 'push/send' && method === 'POST') {
+    try {
+      const webpush = (await import('web-push')).default;
+      const publicKey = process.env.VAPID_PUBLIC_KEY;
+      const privateKey = process.env.VAPID_PRIVATE_KEY;
+      const contact = process.env.VAPID_CONTACT_EMAIL || 'admin@example.com';
+      if (!publicKey || !privateKey) return err('VAPID keys not configured', 500);
+      webpush.setVapidDetails(`mailto:${contact}`, publicKey, privateKey);
+
+      const body = await getJsonBody(request);
+      const title = body?.title || 'مركز الغزلان';
+      const message = body?.message || body?.body || '';
+      const url = body?.url || '/';
+      const tag = body?.tag || 'broadcast';
+      const targetTag = body?.targetTag || null; // null = all
+      const userId = body?.userId || null;
+
+      let query = {};
+      if (userId) query.userId = userId;
+      else if (targetTag) query.tags = targetTag;
+
+      const subs = await db.collection('push_subscriptions').find(query).toArray();
+      const payload = JSON.stringify({ title, body: message, url, tag, icon: '/icons/icon-192.png' });
+
+      let sent = 0, failed = 0;
+      const expired = [];
+      for (const s of subs) {
+        try {
+          await webpush.sendNotification({ endpoint: s.endpoint, keys: s.keys }, payload);
+          sent++;
+        } catch (e) {
+          failed++;
+          if (e?.statusCode === 410 || e?.statusCode === 404) expired.push(s.endpoint);
+        }
+      }
+      // Clean up expired
+      if (expired.length > 0) {
+        await db.collection('push_subscriptions').deleteMany({ endpoint: { $in: expired } });
+      }
+
+      await logActivity(db, { action: 'push_broadcast', details: `Push: "${title}" sent to ${sent}/${subs.length}`, ip: clientIp });
+      return ok({ success: true, sent, failed, expired: expired.length, total: subs.length });
+    } catch (e) {
+      console.error('[push/send] error:', e?.stack || e?.message);
+      return err('Failed to send push: ' + e.message, 500);
+    }
+  }
+
+  if (path === 'push/test' && method === 'POST') {
+    // Same as push/send but sends a test message
+    try {
+      const webpush = (await import('web-push')).default;
+      const publicKey = process.env.VAPID_PUBLIC_KEY;
+      const privateKey = process.env.VAPID_PRIVATE_KEY;
+      const contact = process.env.VAPID_CONTACT_EMAIL || 'admin@example.com';
+      if (!publicKey || !privateKey) return err('VAPID keys not configured', 500);
+      webpush.setVapidDetails(`mailto:${contact}`, publicKey, privateKey);
+
+      const body = await getJsonBody(request);
+      const subs = body?.endpoint
+        ? await db.collection('push_subscriptions').find({ endpoint: body.endpoint }).toArray()
+        : await db.collection('push_subscriptions').find({}).limit(1).toArray();
+      if (subs.length === 0) return err('No subscriptions found', 404);
+      const payload = JSON.stringify({
+        title: '🧪 رسالة اختبار',
+        body: 'هذه رسالة اختبار من مركز الغزلان — Push Notifications تعمل بشكل صحيح ✅',
+        url: '/',
+        icon: '/icons/icon-192.png',
+      });
+      let sent = 0, failed = 0;
+      for (const s of subs) {
+        try { await webpush.sendNotification({ endpoint: s.endpoint, keys: s.keys }, payload); sent++; }
+        catch { failed++; }
+      }
+      return ok({ success: true, sent, failed });
+    } catch (e) { return err(e.message, 500); }
   }
 
 
