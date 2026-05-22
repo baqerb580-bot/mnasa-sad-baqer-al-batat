@@ -30,7 +30,7 @@ import {
   Wifi, MapPin, Activity, AlertTriangle, TrendingUp, DollarSign, Zap,
   Send, Bot, Menu, Bell, ChevronLeft, ChevronRight, Box, CreditCard, FileText, X,
   CheckCircle2, Clock, AlertCircle, Globe, Smartphone, Headphones,
-  HardDrive, Plug, Battery, ScanLine, Receipt, ShoppingBag, UserCheck,
+  HardDrive, Plug, Battery, ScanLine, Receipt, ShoppingBag, UserCheck, Crown,
   Building2, BarChart, PieChart as PieIcon, Boxes, ChevronDown, Printer, ListTodo, Check, XCircle, LogOut, MessageSquare, QrCode, Power, RefreshCw, Wallet, Brain
 } from 'lucide-react';
 import AdminLayoutClient from '@/components/admin-layout-client';
@@ -46,6 +46,7 @@ import Subscribers from '@/components/admin/subscribers';
 import TasksManager from '@/components/admin/tasks-manager';
 import Agents from '@/components/admin/agents';
 import MobileAppPage from '@/components/admin/mobile-app';
+import CRMPage from '@/components/admin/crm';
 import { ColumnHeader } from '@/components/admin/shared/ColumnHeader';
 import { TaskAdvancedActions } from '@/components/admin/shared/TaskAdvancedActions';
 import { Field } from '@/components/admin/shared/Field';
@@ -128,6 +129,7 @@ const MENU = [
   { id: 'repairs', label: 'صيانة الهواتف', icon: Wrench, color: 'gold' },
   { id: 'cameras', label: 'الكاميرات', icon: Camera, color: 'gold' },
   { id: 'employees', label: 'الموظفون', icon: Users, color: 'gold' },
+  { id: 'crm', label: 'CRM إدارة العملاء', icon: Crown, color: 'gold' },
   { id: 'tasks', label: 'المهام', icon: ListTodo, color: 'neon' },
   { id: 'reports', label: 'التقارير والتحليلات', icon: BarChart3, color: 'neon' },
   { id: 'ai', label: 'المساعد الذكي AI', icon: Sparkles, color: 'gold' },
@@ -230,6 +232,7 @@ function App() {
           {active === 'repairs' && <Repairs />}
           {active === 'cameras' && <Cameras />}
           {active === 'employees' && <Employees />}
+          {active === 'crm' && <CRMPage />}
           {active === 'reports' && <Reports />}
           {active === 'tasks' && <TasksManager />}
           {active === 'ai' && <AIAssistant />}

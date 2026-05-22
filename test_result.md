@@ -7039,3 +7039,41 @@ agent_communication:
       User can build APK on their local machine in ~3 minutes using:
         cd android && ./gradlew assembleDebug
 
+  - agent: "main"
+    message: |
+      👥 CRM CUSTOMER MANAGEMENT COMPLETE (2026-05-22):
+      
+      Backend (added 201 lines in route.js):
+      - GET /api/crm/overview → KPIs, byTier, byRisk, top10, atRisk
+      - GET /api/crm/customers → all customers with computed stats
+      - GET /api/crm/customers/:id → single customer detail (linked sales + activations)
+      - POST /api/crm/customers/:id/note → add CRM note
+      - DELETE /api/crm/customers/:id/note/:noteId → delete note
+      
+      Smart computation (no new collection - enriches existing subscribers):
+      - Lifetime Value = sum(sales total where phone matches) + sum(activations.amount)
+      - Loyalty points = floor(LTV / 1000) — 1 pt per 1k IQD spent
+      - Tiers: 🥉 Bronze (<500K) · 🥈 Silver (500K-2M) · 🥇 Gold (2M-5M) · 💎 Platinum (5M+)
+      - Risk: low(<60d) · medium(60-90d) · high(>90d or expired) · unknown(no activity)
+      
+      Frontend (/app/components/admin/crm.js, 476 lines):
+      - Sidebar item "CRM إدارة العملاء" with Crown icon (between Employees and Tasks)
+      - 5 KPI cards (totalCustomers, totalLTV, avgLTV, loyaltyPoints, atRisk count)
+      - 4 tabs: نظرة عامة | جميع العملاء | كبار الزبائن | عملاء بخطر
+      - Tier distribution grid (4 cards)
+      - Risk distribution grid (4 cards)
+      - Top customers row component (reusable)
+      - Filter: search by name/phone, filter by tier, filter by risk
+      - Customer Detail Dialog: 4 KPIs + 3 tabs (Notes/Sales/Activations) + add/delete notes
+      - All Arabic UI with proper RTL + emoji icons + tier-colored badges
+      
+      Verification (Playwright):
+      - Login → Sidebar "CRM إدارة العملاء" → CLICKED
+      - All 7 expected texts found: إجمالي العملاء, نقاط الولاء, Top 5, 4 tiers
+      - GET /api/crm/overview → 200, returns valid data (9 customers, 880K LTV, 880 pts)
+      - Click customer row → Detail dialog opens with KPIs and tabs
+      - No ReferenceError
+      
+      Status: ✅ CRM system fully functional.
+      Computes everything on-the-fly from existing data — zero data migration needed.
+
