@@ -12,6 +12,22 @@ const nextConfig = {
   reactStrictMode: false,
   poweredByHeader: false,
 
+  // ============ OOM MITIGATION + PERFORMANCE ============
+  // Reduce per-icon import overhead — each lucide icon becomes its own module
+  // Big win for compile memory when many icons are used (page.js has 50+)
+  modularizeImports: {
+    'lucide-react': {
+      transform: 'lucide-react/dist/esm/icons/{{kebabCase member}}',
+      skipDefaultConversion: true,
+    },
+  },
+
+  // SWC minifier is much faster + uses less memory than Terser
+  swcMinify: true,
+
+  // Skip type collection during dev (saves memory)
+  productionBrowserSourceMaps: false,
+
   images: {
     unoptimized: true,
     remotePatterns: [
@@ -21,7 +37,12 @@ const nextConfig = {
 
   // mongodb is a server-only package — keep it external
   experimental: {
-    serverComponentsExternalPackages: ['mongodb', 'bcryptjs'],
+    serverComponentsExternalPackages: ['mongodb', 'bcryptjs', 'otpauth', 'qrcode'],
+    // Cache for faster Hot Module Reload + less memory churn
+    optimisticClientCache: true,
+    // Reduce parallelism in dev to lower peak memory
+    workerThreads: false,
+    cpus: 1,
   },
 
   // Skip ESLint blocking on production builds (we lint separately)

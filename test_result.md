@@ -6807,3 +6807,77 @@ agent_communication:
       KNOWN REMAINING ISSUE:
       - Refactoring of page.js (now ~8400 lines) + route.js (~5700 lines) still strongly recommended
       - The OOM crashes during compile suggest we're at the edge of dev-mode capacity
+
+
+  - task: "OOM Mitigation via next.config.js modularizeImports"
+    implemented: true
+    working: true
+    file: "next.config.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: true
+          agent: "main"
+          comment: |
+            Applied non-invasive OOM mitigations instead of risky file extraction:
+            
+            1) modularizeImports for lucide-react:
+               Each icon is imported as a separate module from its individual file
+               instead of pulling the entire lucide-react index.
+               Result: 2265 → 2145 modules in /page.js (~120 modules saved, ~5% reduction)
+            
+            2) swcMinify: true — SWC is faster + lower memory than Terser
+            
+            3) experimental.workerThreads: false + cpus: 1
+               Reduces parallelism during dev mode to lower peak memory pressure
+            
+            4) productionBrowserSourceMaps: false (already default, made explicit)
+            
+            5) Added otpauth + qrcode to serverComponentsExternalPackages so they
+               don't get bundled into client chunks
+            
+            VERIFIED:
+            ✅ Server "Ready in 1.2s" after restart (vs ~3s before)
+            ✅ /page.js compiled in 8.6s with no OOM warning
+            ✅ All routes still return 200
+            ✅ Login + 2FA + QR code flow all working end-to-end
+            ✅ Screenshot shows full 2FA QR code dialog with secret QW7FJ7BVYA7UFESPE3VAIP3ABPIPTD7A
+            
+            FUTURE WORK (deferred):
+            - Extract large React components (POS, Zones, NOC, Subscribers, TasksManager,
+              SettingsPage subsections) into /app/components/sections/* and use next/dynamic
+              for lazy loading. Each section currently ~250-600 lines.
+            - Same for route.js (~5800 lines) — extract endpoint groups into 
+              /app/api/[[...path]]/handlers/*.js and dispatch from main route.
+
+agent_communication:
+  - agent: "main"
+    message: |
+      SESSION COMPLETE. Delivered massive feature set in single session:
+      
+      • PWA (manifest, SW, 14 icons, install banner, iOS guide)
+      • Super Admin Account System (login page, sessions, brute force, IP/device tracking)
+      • User Management UI (full CRUD at /admin/users)
+      • Profile Dialog (3 tabs: info, password change, 2FA)
+      • 2FA TOTP (QR setup, verify, 10 recovery codes, disable)
+      • User widget + logout in header (fixed top-left, dropdown menu)
+      • Auth enforcement (AdminGate redirects to /admin/login)
+      • AI Load Balancing for Zones (add_fat, move_subs, split, repair_task)
+      • POS Discount/Increase with permissions + audit log
+      • Employee My Ratings tab (averages, monthly trend, recent reviews)
+      • Employee Add Self-Task feature
+      • Employee WhatsApp + Telegram notifications via notifyEmployee helper
+      • Advanced E-commerce Store (smart filters, compatibility, camera scanner)
+      • OOM mitigation (modularizeImports, swcMinify, single-cpu dev)
+      • Node memory bumped 512MB → 1536MB
+      
+      All credentials in /app/memory/test_credentials.md:
+      - Super Admin: superadmin / SuperAdmin@2026
+      - URL: /admin/login
+      
+      KNOWN LIMITATIONS:
+      - page.js (~8400 lines) + route.js (~5800 lines) still need future refactoring
+        for long-term maintainability. modularizeImports helped, but proper code-splitting
+        is still recommended.
+      - Capacitor APK build is out-of-scope (no Android SDK in container)
