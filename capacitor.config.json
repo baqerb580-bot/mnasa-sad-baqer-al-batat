@@ -1,0 +1,46 @@
+{
+  "appId": "com.ghazlan.erp",
+  "appName": "مركز الغزلان",
+  "webDir": "capacitor-web",
+  "server": {
+    "url": "https://isp-noc-hub.preview.emergentagent.com",
+    "cleartext": false,
+    "androidScheme": "https",
+    "allowNavigation": [
+      "*.preview.emergentagent.com",
+      "*.emergent.host",
+      "*.emergentagent.com",
+      "wa.me",
+      "api.whatsapp.com",
+      "t.me",
+      "telegram.org",
+      "api.telegram.org"
+    ]
+  },
+  "android": {
+    "allowMixedContent": false,
+    "captureInput": true,
+    "webContentsDebuggingEnabled": true,
+    "backgroundColor": "#0a0a0a"
+  },
+  "plugins": {
+    "SplashScreen": {
+      "launchShowDuration": 2000,
+      "launchAutoHide": true,
+      "launchFadeOutDuration": 300,
+      "backgroundColor": "#0a0a0a",
+      "androidSplashResourceName": "splash",
+      "androidScaleType": "CENTER_CROP",
+      "showSpinner": true,
+      "androidSpinnerStyle": "small",
+      "spinnerColor": "#d4af37",
+      "splashFullScreen": true,
+      "splashImmersive": true
+    },
+    "StatusBar": {
+      "backgroundColor": "#0a0a0a",
+      "style": "DARK",
+      "overlay": false
+    }
+  }
+}

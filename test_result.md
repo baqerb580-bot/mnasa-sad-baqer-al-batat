@@ -6991,3 +6991,51 @@ agent_communication:
       - Agents tab: OK
       
       Status: ✅ Frontend regression fully resolved.
+  - agent: "main"
+    message: |
+      📱 ANDROID APK / CAPACITOR INTEGRATION COMPLETE (2026-05-22):
+      
+      Setup:
+      - Installed Capacitor 6 + 3 plugins (app, splash-screen, status-bar)
+      - Created /app/capacitor.config.json with appId=com.ghazlan.erp, appName=مركز الغزلان
+        targeting NEXT_PUBLIC_BASE_URL (WebView wrapper approach)
+      - Initialized /app/android/ native project via `npx cap add android`
+      - Generated launcher icons for all 5 densities (mdpi → xxxhdpi)
+        from public/icons/icon-512.png + adaptive icon foreground
+      - Generated splash screens for all 10 portrait+landscape densities (dark theme)
+      - Customized AndroidManifest.xml with permissions:
+        INTERNET, CAMERA (barcode scan), STORAGE, NOTIFICATIONS, WAKE_LOCK
+      - Forced portrait orientation + RTL support
+      - Updated colors.xml (accent=#d4af37 gold, primary=#0a0a0a black)
+      
+      New UI:
+      - Added sidebar item "تطبيق الموبايل (APK)" (Smartphone icon) between
+        Activity Logs and Settings — NO BUTTON DUPLICATION
+      - Created /app/components/admin/mobile-app.js (310 lines):
+        * Info card (appId, appName, project size, target URL)
+        * Tab 1: Download ZIP button + GitHub clone instructions
+        * Tab 2: Build prerequisites + 4 build command boxes (debug, release, open, install)
+        * Tab 3: 10-feature grid + Capacitor plugins list
+      
+      New Backend Endpoints:
+      - GET /api/mobile-app/info → returns config + project metadata
+      - GET /api/mobile-app/download-project → streams ZIP (1.4 MB, 122 entries)
+        Uses system `zip` + `rsync` (skips build/.gradle artifacts)
+        Includes android/, capacitor.config.json, ANDROID_BUILD.md, README.md, package.json
+      
+      Documentation:
+      - Created /app/ANDROID_BUILD.md with full build instructions (Arabic)
+      
+      Verification (Playwright):
+      - Login → Dashboard → Click "تطبيق الموبايل" sidebar item → CLICKED
+      - All 5 expected texts found: com.ghazlan.erp, تنزيل المشروع, خطوات البناء,
+        المميزات, Capacitor
+      - No ReferenceError on page
+      - GET /api/mobile-app/info → returns valid JSON with appId/serverUrl
+      - GET /api/mobile-app/download-project → 200 OK, 1.4 MB ZIP containing 122 files
+        (verified via unzip -l: AndroidManifest.xml, build.gradle, icons, splash, strings)
+      
+      Status: ✅ Mobile app system fully functional.
+      User can build APK on their local machine in ~3 minutes using:
+        cd android && ./gradlew assembleDebug
+

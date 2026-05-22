@@ -45,6 +45,7 @@ import Products from '@/components/admin/products';
 import Subscribers from '@/components/admin/subscribers';
 import TasksManager from '@/components/admin/tasks-manager';
 import Agents from '@/components/admin/agents';
+import MobileAppPage from '@/components/admin/mobile-app';
 import { ColumnHeader } from '@/components/admin/shared/ColumnHeader';
 import { TaskAdvancedActions } from '@/components/admin/shared/TaskAdvancedActions';
 import { Field } from '@/components/admin/shared/Field';
@@ -136,6 +137,7 @@ const MENU = [
   { id: 'accounting', label: 'المحاسبة المالية', icon: CreditCard, color: 'gold' },
   { id: 'balance', label: 'إدارة الرصيد (Fast/Master)', icon: Wallet, color: 'gold' },
   { id: 'activity', label: 'سجل النشاطات والجلسات', icon: Activity, color: 'rose' },
+  { id: 'mobile-app', label: 'تطبيق الموبايل (APK)', icon: Smartphone, color: 'neon' },
   { id: 'settings', label: 'الإعدادات', icon: Settings, color: 'neon' },
 ];
 
@@ -237,6 +239,7 @@ function App() {
           {active === 'accounting' && <AccountingPage />}
           {active === 'balance' && <BalanceManagement api={api} />}
           {active === 'activity' && <ActivityLogsPage />}
+          {active === 'mobile-app' && <MobileAppPage />}
           {active === 'settings' && <SettingsPage />}
         </main>
       </div>
