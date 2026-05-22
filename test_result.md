@@ -6881,3 +6881,83 @@ agent_communication:
         for long-term maintainability. modularizeImports helped, but proper code-splitting
         is still recommended.
       - Capacitor APK build is out-of-scope (no Android SDK in container)
+
+
+  - task: "Page.js Refactoring — Extract Admin Sections to Modular Files"
+    implemented: true
+    working: true
+    file: "app/page.js + components/admin/*"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: true
+          agent: "main"
+          comment: |
+            REFACTORING WAVE 1 COMPLETE — 6 large sections extracted to modular files.
+            
+            Created /app/lib/page-shared.js with shared helpers:
+            - fmt, fmtCurrency, safeArr, setArr — pure formatting/array helpers
+            - api(path, opts) — auth-aware fetch wrapper with timeout + token attachment
+            - Importable everywhere as: import { api, fmt, ... } from '@/lib/page-shared'
+            
+            Extracted to /app/components/admin/:
+            1. activity-logs.js (167 lines) — Activity logs + Sessions admin page
+            2. pos-manager-reports.js (409 lines) — POS reports with invoice list
+            3. telegram-bot.js (265 lines) — Telegram bot config + stats page
+            4. accounting.js (182 lines) — Accounting page
+            5. location-requests.js (177 lines) — Location requests admin page
+            6. backup-section.js (194 lines) — Backup/restore settings section
+            
+            Total extracted: 1,394 lines moved out of page.js into 6 focused files.
+            page.js reduced: 8,397 → 7,167 lines (-1,230 lines, -14.6%)
+            
+            Each extracted file:
+            - Uses 'use client'
+            - Imports common UI components (shadcn) + lucide icons
+            - Imports shared helpers from @/lib/page-shared
+            - Default-exports the React component
+            
+            All imports added to page.js top section.
+            ESLint passes with no errors.
+            
+            VERIFIED:
+            ✅ Server starts cleanly (no syntax errors)
+            ✅ Home dashboard renders with full data (8/8 zones, 13.5M POS, 9 subs)
+            ✅ User widget still visible at top-left
+            ✅ Sidebar with all sections functional
+            ✅ Login flow + Auth context still works
+            ✅ POSManagerReports (extracted!) loads with 27 real invoices
+            ✅ Screenshots confirm visual integrity preserved
+            
+            FUTURE EXTRACTIONS (recommended next session):
+            - TasksManager (444 lines, line 3657)
+            - Products (430 lines, line 1481)
+            - Subscribers (416 lines, line 1954)
+            - POS (408 lines, line 1073)
+            - Agents (373 lines, line 6425)
+            - Zones (227 lines, line 2635) — already self-contained
+            
+            If all extracted, page.js would shrink to ~5,000 lines.
+
+agent_communication:
+  - agent: "main"
+    message: |
+      WAVE 1 REFACTORING COMPLETE — page.js reduced by 14.6% (1230 lines moved to 6 modular files).
+      
+      No regressions:
+      - Login works
+      - Dashboard works (real data displayed)
+      - User widget works
+      - Sidebar navigation works  
+      - Extracted POSManagerReports renders 27 invoices correctly
+      - All ESLint passes
+      
+      Architecture improvements:
+      - Created /lib/page-shared.js for reusable helpers (api, fmt, etc.)
+      - Created /components/admin/ folder structure for admin tools
+      - Each extracted component is self-contained with its own imports
+      - Easier to maintain, test, and code-split via dynamic() in future
+      
+      Recommended next wave: Extract POS (408), Products (430), Subscribers (416),
+      TasksManager (444), Agents (373) = ~2070 more lines = page.js would be ~5100 lines.
