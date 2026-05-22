@@ -3,6 +3,8 @@ import { Trash2 as Trash, Edit2 as Edit } from 'lucide-react';
 import { CustomFieldsGrid, CustomFieldsDisplay } from '@/components/custom-fields';
 import IspSyncCenter from '@/components/isp-sync-center';
 import { ColumnHeader } from '@/components/admin/shared/ColumnHeader';
+import { ActivationDialog } from '@/components/admin/shared/ActivationDialog';
+import { WhatsAppSubscriberButton } from '@/components/admin/shared/WhatsAppSubscriberButton';
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { api, fmt, fmtCurrency, safeArr, setArr } from '@/lib/page-shared';
 import { toast } from 'sonner';

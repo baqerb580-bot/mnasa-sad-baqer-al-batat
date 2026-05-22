@@ -6961,3 +6961,33 @@ agent_communication:
       
       Recommended next wave: Extract POS (408), Products (430), Subscribers (416),
       TasksManager (444), Agents (373) = ~2070 more lines = page.js would be ~5100 lines.
+
+  - agent: "main"
+    message: |
+      🔧 WAVE 2 REFACTORING HOTFIX (2026-05-22):
+      
+      Issue: After extracting POS, Products, Subscribers, TasksManager, Agents into
+      /app/components/admin/*.js, the dashboard crashed with multiple "X is not defined"
+      errors because three helper components living inside page.js were no longer accessible:
+        - WhatsAppSubscriberButton (used by Subscribers)
+        - ActivationDialog (used by Subscribers)
+        - TaskReviewDialog (used by TasksManager)
+      
+      Fix:
+      - Extracted all three into /app/components/admin/shared/:
+        * WhatsAppSubscriberButton.js
+        * ActivationDialog.js
+        * TaskReviewDialog.js
+      - Added imports in subscribers.js + tasks-manager.js.
+      - Added missing `sounds` import in pos.js.
+      
+      Verification (Playwright):
+      - /admin/login → login succeeds with superadmin/SuperAdmin@2026
+      - Dashboard renders with real KPIs (POS 13.8M IQD, 9 subscribers, 42 products)
+      - Subscribers tab: OK (no ReferenceError)
+      - Tasks tab: OK (29 tasks rendered)
+      - POS tab: OK
+      - Products tab: OK
+      - Agents tab: OK
+      
+      Status: ✅ Frontend regression fully resolved.

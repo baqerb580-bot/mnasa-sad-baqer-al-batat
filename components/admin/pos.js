@@ -3,6 +3,7 @@ import BarcodeScanner from '@/components/barcode-scanner';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { api, fmt, fmtCurrency, safeArr, setArr } from '@/lib/page-shared';
+import { sounds } from '@/lib/sounds';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
