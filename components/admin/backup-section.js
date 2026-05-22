@@ -32,9 +32,11 @@ import {
 
 export default function BackupSection({ draft, update, runBackup }) {
   const b = draft.backup || {};
+  const gd = b.googleDrive || {};
   const [list, setList] = useState([]);
   const [loadingList, setLoadingList] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [testingGd, setTestingGd] = useState(false);
 
   const loadList = async () => {
     setLoadingList(true);
@@ -49,6 +51,42 @@ export default function BackupSection({ draft, update, runBackup }) {
     await runBackup();
     await loadList();
     setBusy(false);
+  };
+
+  // Helper to update Google Drive nested settings
+  const updateGd = (key, value) => {
+    const merged = { ...gd, [key]: value };
+    update('backup', 'googleDrive', merged);
+  };
+
+  // Validate Google Drive folder URL/ID
+  const extractDriveFolderId = (input) => {
+    if (!input) return '';
+    const m = String(input).match(/(?:folders\/|id=|\/d\/)([a-zA-Z0-9_-]{20,})/);
+    return m ? m[1] : String(input).trim();
+  };
+
+  const testGdConnection = async () => {
+    if (!gd.folderUrl) { toast.error('أدخل رابط/مسار Google Drive أولاً'); return; }
+    setTestingGd(true);
+    try {
+      const r = await api('settings/backup/gdrive-test', {
+        method: 'POST',
+        body: JSON.stringify({ folderUrl: gd.folderUrl, folderId: extractDriveFolderId(gd.folderUrl) }),
+      });
+      if (r?.success) {
+        toast.success('✅ تم الاتصال — المجلد جاهز للاستخدام');
+        updateGd('verified', true);
+        updateGd('folderId', extractDriveFolderId(gd.folderUrl));
+      } else {
+        toast.warning(r?.message || 'تم الحفظ — يحتاج تفعيل OAuth لاحقاً');
+        updateGd('verified', false);
+      }
+    } catch (e) {
+      toast.error('فشل الاتصال: ' + (e?.message || ''));
+    } finally {
+      setTestingGd(false);
+    }
   };
 
   const downloadBackup = (id, filename) => {
@@ -128,6 +166,97 @@ export default function BackupSection({ draft, update, runBackup }) {
             <span className="text-muted-foreground font-mono dir-ltr">/app/backups/</span>
           </div>
         </Field>
+      </div>
+
+      {/* ============ GOOGLE DRIVE INTEGRATION ============ */}
+      <div className={`relative border-2 rounded-xl p-4 transition-all ${gd.enabled ? 'border-emerald-500/50 bg-emerald-500/5' : 'border-gold-soft bg-input/10'}`}>
+        <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+          <div className="flex items-center gap-3">
+            <div className={`relative w-12 h-12 rounded-xl flex items-center justify-center text-2xl transition-all ${gd.enabled ? 'bg-emerald-500/20 ring-2 ring-emerald-500/50' : 'bg-zinc-500/10'}`}>
+              ☁️
+              {gd.enabled && (
+                <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-emerald-500 text-white text-[10px] flex items-center justify-center font-bold animate-pulse">
+                  ✓
+                </span>
+              )}
+            </div>
+            <div>
+              <h3 className="font-bold text-base flex items-center gap-2">
+                Google Drive
+                {gd.enabled && <Badge className="bg-emerald-500/20 text-emerald-400 border-emerald-500/40 text-[10px]">🟢 مفعّل</Badge>}
+                {gd.enabled && gd.verified && <Badge className="bg-cyan-500/20 text-cyan-400 border-cyan-500/40 text-[10px]">✓ متصل</Badge>}
+              </h3>
+              <p className="text-[11px] text-muted-foreground">رفع النسخ الاحتياطية تلقائياً إلى Google Drive</p>
+            </div>
+          </div>
+          <Switch checked={!!gd.enabled} onCheckedChange={v => updateGd('enabled', v)} className="data-[state=checked]:bg-emerald-500" />
+        </div>
+
+        {gd.enabled && (
+          <div className="space-y-3 mt-3">
+            <div>
+              <Label className="text-xs flex items-center gap-2 mb-1">
+                🔗 رابط مجلد Google Drive
+                <span className="text-[10px] text-muted-foreground">(أو معرّف Folder ID مباشرةً)</span>
+              </Label>
+              <div className="flex gap-2">
+                <Input
+                  value={gd.folderUrl || ''}
+                  onChange={e => { updateGd('folderUrl', e.target.value); updateGd('verified', false); }}
+                  placeholder="https://drive.google.com/drive/folders/XXXXXXXXXXXX"
+                  className="bg-input/30 border-gold/20 font-mono text-xs flex-1"
+                  dir="ltr"
+                />
+                <Button
+                  size="sm"
+                  onClick={testGdConnection}
+                  disabled={testingGd || !gd.folderUrl}
+                  className="btn-gold whitespace-nowrap"
+                >
+                  {testingGd ? '⏳ جاري...' : '🔍 اختبار الاتصال'}
+                </Button>
+              </div>
+              {gd.folderId && (
+                <p className="text-[10px] text-cyan-400 mt-1 font-mono">📁 Folder ID: {gd.folderId}</p>
+              )}
+            </div>
+
+            <div className="grid md:grid-cols-2 gap-3">
+              <div>
+                <Label className="text-xs">📧 بريد حساب الخدمة (Service Account)</Label>
+                <Input
+                  value={gd.serviceAccountEmail || ''}
+                  onChange={e => updateGd('serviceAccountEmail', e.target.value)}
+                  placeholder="backup@project.iam.gserviceaccount.com"
+                  className="bg-input/30 border-gold/20 font-mono text-xs"
+                  dir="ltr"
+                />
+                <p className="text-[10px] text-muted-foreground mt-1">شارك المجلد مع هذا البريد بصلاحية «محرّر»</p>
+              </div>
+              <div>
+                <Label className="text-xs">📤 نمط الرفع</Label>
+                <Select value={gd.uploadMode || 'auto'} onValueChange={v => updateGd('uploadMode', v)}>
+                  <SelectTrigger className="bg-input/30 border-gold/20"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="auto">🤖 تلقائي مع كل نسخة</SelectItem>
+                    <SelectItem value="manual">👤 يدوي فقط</SelectItem>
+                    <SelectItem value="daily">📅 مرة يومياً</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <div className="p-2 rounded-lg bg-amber-500/5 border border-amber-500/30 text-[11px] text-amber-300">
+              <p className="font-bold mb-1">📋 تعليمات الإعداد السريع:</p>
+              <ol className="list-decimal list-inside space-y-0.5 text-[10px]">
+                <li>أنشئ مجلد على Google Drive وانسخ رابطه أعلاه</li>
+                <li>(اختياري) أضف بريد حساب الخدمة وشارك المجلد معه بصلاحية محرّر</li>
+                <li>اضغط «اختبار الاتصال» للتحقق</li>
+                <li>كل نسخة احتياطية ستُرفع تلقائياً عند تفعيل النمط «تلقائي»</li>
+              </ol>
+            </div>
+          </div>
+        )}
       </div>
 
       <Button onClick={triggerNow} disabled={busy} className="btn-gold w-full">

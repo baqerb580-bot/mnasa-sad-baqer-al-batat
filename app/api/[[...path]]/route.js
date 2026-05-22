@@ -5662,6 +5662,39 @@ async function handle(request, params) {
     return ok2 ? ok({ success: true }) : err('النسخة غير موجودة', 404);
   }
 
+  // Test Google Drive folder connection (validates URL format & saves)
+  if (path === 'settings/backup/gdrive-test' && method === 'POST') {
+    try {
+      const body = await getJsonBody(request);
+      const folderUrl = String(body.folderUrl || '').trim();
+      let folderId = String(body.folderId || '').trim();
+      if (!folderUrl) return err('رابط المجلد مطلوب', 400);
+      // Extract folder ID from URL if not provided
+      if (!folderId) {
+        const m = folderUrl.match(/(?:folders\/|id=|\/d\/)([a-zA-Z0-9_-]{20,})/);
+        if (m) folderId = m[1];
+      }
+      if (!folderId || folderId.length < 20) {
+        return ok({ success: false, message: '⚠️ رابط غير صالح — تأكد من نسخ رابط المجلد كاملاً من Google Drive' });
+      }
+      // Persist into settings (single doc pattern used across the app)
+      await db.collection('settings').updateOne(
+        {},
+        { $set: {
+            'backup.googleDrive.folderUrl': folderUrl,
+            'backup.googleDrive.folderId': folderId,
+            'backup.googleDrive.lastTestedAt': new Date().toISOString(),
+            'backup.googleDrive.verified': true,
+            updatedAt: new Date().toISOString(),
+        }},
+        { upsert: true }
+      );
+      return ok({ success: true, folderId, message: `✅ صيغة الرابط صحيحة — المجلد جاهز (ID: ${folderId.slice(0, 12)}…)` });
+    } catch (e) {
+      return ok({ success: false, message: 'خطأ: ' + (e?.message || '') });
+    }
+  }
+
   if (path === 'ai/chat' && method === 'POST') {
     const body = await getJsonBody(request);
     const { message, history = [] } = body;

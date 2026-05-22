@@ -28,6 +28,8 @@ export default function BalanceManagement({ api }) {
   const [transferForm, setTransferForm] = useState({ fromAccountId: '', toAccountId: '', amount: '', description: '' });
   const [addAccountOpen, setAddAccountOpen] = useState(false);
   const [newAccount, setNewAccount] = useState({ name: '', type: 'other', icon: '💰', color: '#888' });
+  const [ispPresetsOpen, setIspPresetsOpen] = useState(false);
+  const [ispAdding, setIspAdding] = useState(false);
   const [filterAcc, setFilterAcc] = useState('__all');
   const [filterType, setFilterType] = useState('__all');
 
@@ -103,6 +105,29 @@ export default function BalanceManagement({ api }) {
     }
   };
 
+  // ISP Provider presets - Internet companies (Halasat, Watani, Earthlink, Dish Network)
+  const ISP_PRESETS = [
+    { key: 'halasat',  name: 'رصيد هالة سات',  icon: '🛰️', color: '#3b82f6', type: 'isp_provider' },
+    { key: 'watani',   name: 'رصيد وطني',       icon: '🇮🇶', color: '#10b981', type: 'isp_provider' },
+    { key: 'earthlink',name: 'رصيد إيرثلنك',    icon: '🌐', color: '#f59e0b', type: 'isp_provider' },
+    { key: 'dish',     name: 'رصيد دش نتورك',   icon: '📡', color: '#a855f7', type: 'isp_provider' },
+  ];
+  const addIspProviders = async (selectedKeys) => {
+    setIspAdding(true);
+    const existingKeys = new Set(accounts.map(a => a.key));
+    const toAdd = ISP_PRESETS.filter(p => selectedKeys.includes(p.key) && !existingKeys.has(p.key));
+    if (toAdd.length === 0) { toast.warning('كل المزودين المختارين موجودون مسبقاً'); setIspAdding(false); setIspPresetsOpen(false); return; }
+    let added = 0;
+    for (const p of toAdd) {
+      const r = await api('balance/accounts', { method: 'POST', body: JSON.stringify(p) });
+      if (r?.id) added++;
+    }
+    toast.success(`✅ تمت إضافة ${added} مزود إنترنت بحساب منفصل`);
+    setIspPresetsOpen(false);
+    setIspAdding(false);
+    load();
+  };
+
   const deleteTransaction = async (tx) => {
     if (!confirm(`حذف هذه المعاملة (${tx.type === 'deposit' ? '+' : '-'}${fmt(tx.amount)})؟ سيتم إرجاع الرصيد للحالة السابقة.`)) return;
     const r = await api(`balance/transactions/${tx.id}`, { method: 'DELETE' });
@@ -128,9 +153,12 @@ export default function BalanceManagement({ api }) {
         <h1 className="text-2xl font-bold gold-text flex items-center gap-2">
           <Wallet className="w-6 h-6" /> إدارة الرصيد والصرفيات
         </h1>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
           <Button variant="outline" className="border-cyan-500/40 text-cyan-400 hover:bg-cyan-500/10" onClick={() => setTransferOpen(true)}>
             <ArrowLeftRight className="w-4 h-4 ml-1" /> تحويل بين الحسابات
+          </Button>
+          <Button variant="outline" className="border-blue-500/40 text-blue-400 hover:bg-blue-500/10" onClick={() => setIspPresetsOpen(true)}>
+            🛰️ مزودي إنترنت
           </Button>
           <Button variant="outline" className="border-gold/30" onClick={() => setAddAccountOpen(true)}>
             <Plus className="w-4 h-4 ml-1" /> حساب جديد
@@ -362,6 +390,7 @@ export default function BalanceManagement({ api }) {
                 <SelectItem value="cash">كاش</SelectItem>
                 <SelectItem value="box">صندوق</SelectItem>
                 <SelectItem value="bank">بنك</SelectItem>
+                <SelectItem value="isp_provider">🛰️ مزود إنترنت</SelectItem>
                 <SelectItem value="other_provider">مزود آخر</SelectItem>
               </SelectContent>
             </Select>
@@ -375,6 +404,96 @@ export default function BalanceManagement({ api }) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* ISP Providers quick-add dialog */}
+      <IspPresetsDialog
+        open={ispPresetsOpen}
+        onOpenChange={setIspPresetsOpen}
+        presets={ISP_PRESETS}
+        existingKeys={new Set(accounts.map(a => a.key))}
+        onConfirm={addIspProviders}
+        loading={ispAdding}
+      />
     </div>
+  );
+}
+
+// =============================================================
+// ISP Presets Dialog — quick add ISP providers with separate balances
+// =============================================================
+function IspPresetsDialog({ open, onOpenChange, presets, existingKeys, onConfirm, loading }) {
+  const [selected, setSelected] = useState(() => new Set(presets.map(p => p.key)));
+
+  useEffect(() => {
+    if (open) {
+      // Pre-select only those NOT already added
+      const fresh = new Set(presets.filter(p => !existingKeys.has(p.key)).map(p => p.key));
+      setSelected(fresh.size > 0 ? fresh : new Set(presets.map(p => p.key)));
+    }
+  }, [open]);
+
+  const toggle = (key) => {
+    const next = new Set(selected);
+    if (next.has(key)) next.delete(key); else next.add(key);
+    setSelected(next);
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="glass-strong border-blue-500/40 max-w-lg">
+        <DialogHeader>
+          <DialogTitle className="text-blue-400 flex items-center gap-2">
+            🛰️ إضافة مزودي إنترنت
+          </DialogTitle>
+        </DialogHeader>
+        <div className="space-y-2">
+          <p className="text-xs text-muted-foreground">
+            اختر المزودين الذين تريد إضافتهم — كل واحد له <span className="font-bold text-blue-400">حساب رصيد منفصل</span> مع تعبئة وصرف خاصة.
+          </p>
+          <div className="grid grid-cols-1 gap-2 mt-3">
+            {presets.map(p => {
+              const exists = existingKeys.has(p.key);
+              const checked = selected.has(p.key);
+              return (
+                <button
+                  key={p.key}
+                  type="button"
+                  disabled={exists}
+                  onClick={() => !exists && toggle(p.key)}
+                  className={`flex items-center justify-between p-3 rounded-lg border-2 transition-all ${
+                    exists
+                      ? 'bg-zinc-500/10 border-zinc-500/30 opacity-50 cursor-not-allowed'
+                      : checked
+                        ? 'bg-blue-500/10 border-blue-500/60'
+                        : 'bg-input/30 border-gold-soft hover:border-gold/40'
+                  }`}
+                  style={{ borderColor: checked && !exists ? `${p.color}80` : undefined }}
+                >
+                  <div className="flex items-center gap-3">
+                    <span className="text-3xl">{p.icon}</span>
+                    <div className="text-right">
+                      <p className="font-bold" style={{ color: !exists ? p.color : undefined }}>{p.name}</p>
+                      <p className="text-[10px] text-muted-foreground">حساب رصيد منفصل</p>
+                    </div>
+                  </div>
+                  <div className="text-2xl">
+                    {exists ? '✅ موجود' : checked ? '☑️' : '⬜'}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+        <DialogFooter>
+          <Button
+            onClick={() => onConfirm(Array.from(selected))}
+            disabled={loading || selected.size === 0}
+            className="btn-gold w-full"
+          >
+            {loading ? 'جاري الإضافة...' : `إضافة المُختار (${selected.size})`}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

@@ -12,6 +12,7 @@ import BarcodeScanner from '@/components/barcode-scanner';
 import { sounds, getSoundSettings, setSoundSettings, browserNotify, requestNotificationPermission } from '@/lib/sounds';
 import { useRealtimeEvents } from '@/lib/useRealtime';
 import { whatsappLink, telegramLink, defaultWhatsAppTemplates, fillTemplate } from '@/lib/messaging';
+import { TG_ROLES, TG_PERMS } from '@/lib/telegram-constants';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -4817,25 +4818,7 @@ function LoadingScreen() {
 }
 
 // ============ TELEGRAM BOT MANAGEMENT PAGE ============
-const TG_PERMS = [
-  { id: 'reports', label: '📊 التقارير', desc: 'مشاهدة تقارير المبيعات والأرباح' },
-  { id: 'finance', label: '💰 المالية', desc: 'الإيرادات/الديون/المصروفات' },
-  { id: 'subscribers', label: '🌐 المشتركين', desc: 'بيانات المشتركين والديون' },
-  { id: 'employees', label: '👥 الموظفين', desc: 'الحضور والأداء والمهام' },
-  { id: 'maintenance', label: '🛠 الصيانة', desc: 'تذاكر الصيانة' },
-  { id: 'network', label: '📡 الشبكة', desc: 'حالة الزونات والفاتات' },
-  { id: 'manage_users', label: '🔐 إدارة المستخدمين', desc: 'إضافة/حذف IDs' },
-  { id: 'view_logs', label: '📜 السجلات', desc: 'سجل استخدام البوت' },
-];
-const TG_ROLES = [
-  { id: 'super_admin', label: '👑 سوبر أدمن', defaults: TG_PERMS.map(p => p.id) },
-  { id: 'manager', label: '🎩 مدير', defaults: TG_PERMS.map(p => p.id) },
-  { id: 'accountant', label: '💰 محاسب', defaults: ['finance', 'reports', 'subscribers'] },
-  { id: 'hr', label: '👥 موارد بشرية', defaults: ['employees', 'reports'] },
-  { id: 'agent', label: '🤝 وكيل', defaults: ['subscribers'] },
-  { id: 'supervisor', label: '🔧 مشرف', defaults: ['reports', 'maintenance', 'network'] },
-  { id: 'employee', label: '🧑‍💼 موظف', defaults: ['employees'] },
-];
+// (TG_PERMS / TG_ROLES are now imported from '@/lib/telegram-constants' at top)
 
 
 // ============ ORDERS / E-COMMERCE ADMIN PAGE ============
