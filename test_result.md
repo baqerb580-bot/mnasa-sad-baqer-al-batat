@@ -7658,3 +7658,50 @@ agent_communication:
       
       Refactoring successful - code is cleaner, more maintainable, and all functionality preserved.
       NO CRITICAL ISSUES FOUND. Ready for production.
+  - agent: "main"
+    message: |
+      🏗️ ROUTE.JS REFACTORING COMPLETE (2026-05-22):
+      
+      Goal: Reduce route.js size and improve maintainability by extracting
+      self-contained handler groups into separate modules.
+      
+      Approach: Modular dispatch pattern. Each handler:
+      - Exports `handleX(ctx)` where ctx={path, method, request, db, clientIp}
+      - Returns Response if matched, returns null if not handled
+      
+      New structure /app/lib/api-handlers/:
+      - _helpers.js (33 lines) — shared ok/err/getJsonBody/logActivity
+      - index.js (6 lines) — aggregated exports
+      - coupons.js (97 lines) — coupons CRUD + validate
+      - crm.js (210 lines) — CRM overview/customers/notes
+      - suppliers.js (194 lines) — suppliers + POs + payments + statement
+      - push.js (152 lines) — Web Push subscribe/send/test
+      - mobile.js (173 lines) — APK info + project download
+      
+      Changes in route.js:
+      - Added import: `import { handleCoupons, handleCRM, handleSuppliers, handlePush, handleMobile } from '@/lib/api-handlers';`
+      - Replaced 781 lines of inline handlers (lines 5766-6547) with 6-line dispatch:
+        ```js
+        const ctx = { path, method, request, db, clientIp };
+        for (const handler of [handleSuppliers, handleCoupons, handleCRM, handlePush, handleMobile]) {
+          const r = await handler(ctx);
+          if (r) return r;
+        }
+        ```
+      
+      Results:
+      - route.js: 6,570 → 5,796 lines (-12%, -774 lines)
+      - Total project (route.js + 6 handler files): 6,661 lines (+91 line overhead = +1.4%)
+      - Maintainability: ✅ Each handler is independently editable/testable
+      - No regressions: ✅ 20/20 tests passed (100%) via deep testing agent
+      
+      Verified endpoints:
+      - All 5 extracted handler groups (CRM, Coupons, Suppliers, Push, Mobile) work
+      - All older endpoints unaffected (dashboard, ai/insights, products, subscribers,
+        auth/login, zones, orders, whatsapp/templates)
+      - Write operations work (created REGRESSION1 coupon + deleted it)
+      
+      Status: ✅ Refactoring successful — route.js now more maintainable.
+      Further extraction (older sections like SETTINGS, BACKUP, AI Load Balancing,
+      Smart Parts Search) can be done as separate tasks if needed.
+
