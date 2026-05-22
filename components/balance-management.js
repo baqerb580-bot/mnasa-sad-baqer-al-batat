@@ -28,8 +28,8 @@ export default function BalanceManagement({ api }) {
   const [transferForm, setTransferForm] = useState({ fromAccountId: '', toAccountId: '', amount: '', description: '' });
   const [addAccountOpen, setAddAccountOpen] = useState(false);
   const [newAccount, setNewAccount] = useState({ name: '', type: 'other', icon: '💰', color: '#888' });
-  const [filterAcc, setFilterAcc] = useState('');
-  const [filterType, setFilterType] = useState('');
+  const [filterAcc, setFilterAcc] = useState('__all');
+  const [filterType, setFilterType] = useState('__all');
 
   const load = async () => {
     setLoading(true);
@@ -44,8 +44,8 @@ export default function BalanceManagement({ api }) {
 
   const loadTx = async () => {
     const qs = new URLSearchParams();
-    if (filterAcc) qs.set('accountId', filterAcc);
-    if (filterType) qs.set('type', filterType);
+    if (filterAcc && filterAcc !== '__all') qs.set('accountId', filterAcc);
+    if (filterType && filterType !== '__all') qs.set('type', filterType);
     qs.set('limit', '300');
     const t = await api(`balance/transactions?${qs.toString()}`);
     setTransactions(Array.isArray(t) ? t : []);
@@ -226,14 +226,14 @@ export default function BalanceManagement({ api }) {
             <Select value={filterAcc} onValueChange={setFilterAcc}>
               <SelectTrigger className="bg-input/30 border-gold/20 w-44 h-8 text-xs"><SelectValue placeholder="كل الحسابات" /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="">كل الحسابات</SelectItem>
+                <SelectItem value="__all">كل الحسابات</SelectItem>
                 {accounts.map(a => <SelectItem key={a.id} value={a.id}>{a.icon} {a.name}</SelectItem>)}
               </SelectContent>
             </Select>
             <Select value={filterType} onValueChange={setFilterType}>
               <SelectTrigger className="bg-input/30 border-gold/20 w-44 h-8 text-xs"><SelectValue placeholder="كل الأنواع" /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="">كل الأنواع</SelectItem>
+                <SelectItem value="__all">كل الأنواع</SelectItem>
                 <SelectItem value="deposit">➕ إيداع</SelectItem>
                 <SelectItem value="withdraw">➖ صرف</SelectItem>
                 <SelectItem value="auto_deduct">🤖 تسقيط تلقائي</SelectItem>

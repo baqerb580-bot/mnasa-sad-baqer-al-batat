@@ -62,7 +62,7 @@ export default function WhatsAppManager({ api }) {
   const [waStats, setWaStats] = useState(null);
 
   const [messages, setMessages] = useState([]);
-  const [filter, setFilter] = useState({ status: '', type: '', q: '' });
+  const [filter, setFilter] = useState({ status: '__all', type: '__all', q: '' });
 
   const pollRef = useRef(null);
 
@@ -88,8 +88,8 @@ export default function WhatsAppManager({ api }) {
 
   const loadMessages = async () => {
     const qs = new URLSearchParams();
-    if (filter.status) qs.set('status', filter.status);
-    if (filter.type) qs.set('type', filter.type);
+    if (filter.status && filter.status !== '__all') qs.set('status', filter.status);
+    if (filter.type && filter.type !== '__all') qs.set('type', filter.type);
     if (filter.q) qs.set('q', filter.q);
     qs.set('limit', '100');
     const d = await api(`whatsapp/messages?${qs.toString()}`);
@@ -278,7 +278,8 @@ export default function WhatsAppManager({ api }) {
 
 
   const sendBulk = async () => {
-    if (!bulk.templateKey && !bulk.message?.trim()) {
+    const isCustomTpl = !bulk.templateKey || bulk.templateKey === '__custom';
+    if (isCustomTpl && !bulk.message?.trim()) {
       toast.error('اختر قالباً أو اكتب رسالة');
       return;
     }
@@ -286,7 +287,9 @@ export default function WhatsAppManager({ api }) {
     setBulkSending(true);
     setBulkResult(null);
     try {
-      const r = await api('whatsapp/send-bulk', { method: 'POST', body: JSON.stringify(bulk) });
+      const payload = { ...bulk };
+      if (isCustomTpl) payload.templateKey = ''; // backend expects empty for custom
+      const r = await api('whatsapp/send-bulk', { method: 'POST', body: JSON.stringify(payload) });
       setBulkResult(r);
       if (r?.success) toast.success(`📤 تم إرسال ${r.sent}/${r.total} رسالة`);
       else toast.error('فشل الإرسال الجماعي: ' + (r?.error || ''));
@@ -583,7 +586,7 @@ export default function WhatsAppManager({ api }) {
                       {Object.keys(defaults).map(k => (
                         <SelectItem key={k} value={k}>{({activation:'تفعيل',expiry:'انتهاء',expiry_alert:'تنبيه قبل الانتهاء',debt:'دين',receipt:'وصل',generic:'عام'})[k] || k}</SelectItem>
                       ))}
-                      <SelectItem value="">رسالة مخصصة</SelectItem>
+                      <SelectItem value="__custom">رسالة مخصصة</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -614,7 +617,7 @@ export default function WhatsAppManager({ api }) {
                 </div>
               )}
 
-              {!bulk.templateKey && (
+              {(bulk.templateKey === '__custom' || !bulk.templateKey) && (
                 <div>
                   <Label>الرسالة المخصصة (يمكنك استخدام المتغيرات {'{name}'} ...)</Label>
                   <Textarea value={bulk.message} onChange={e => setBulk(b => ({ ...b, message: e.target.value }))} rows={4} className="bg-input/30 border-gold/20" />
@@ -649,7 +652,7 @@ export default function WhatsAppManager({ api }) {
                 <Select value={filter.status} onValueChange={v => setFilter(f => ({ ...f, status: v }))}>
                   <SelectTrigger className="bg-input/30 border-gold/20"><SelectValue placeholder="الحالة" /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">الكل</SelectItem>
+                    <SelectItem value="__all">الكل</SelectItem>
                     <SelectItem value="sent">✅ مرسلة</SelectItem>
                     <SelectItem value="failed">❌ فاشلة</SelectItem>
                     <SelectItem value="queued">⏳ في الانتظار</SelectItem>
@@ -658,7 +661,7 @@ export default function WhatsAppManager({ api }) {
                 <Select value={filter.type} onValueChange={v => setFilter(f => ({ ...f, type: v }))}>
                   <SelectTrigger className="bg-input/30 border-gold/20"><SelectValue placeholder="النوع" /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">الكل</SelectItem>
+                    <SelectItem value="__all">الكل</SelectItem>
                     <SelectItem value="activation">تفعيل</SelectItem>
                     <SelectItem value="expiry">انتهاء</SelectItem>
                     <SelectItem value="expiry_alert">تنبيه</SelectItem>
