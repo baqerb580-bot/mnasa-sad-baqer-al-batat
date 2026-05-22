@@ -6,6 +6,12 @@ export default function SetupDiagnosticPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
+  // Connection Tester state
+  const [testUrl, setTestUrl] = useState('');
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState(null);
+  const [showTester, setShowTester] = useState(false);
+
   const runSetup = async () => {
     setLoading(true);
     setError(null);
@@ -17,6 +23,25 @@ export default function SetupDiagnosticPage() {
       setError(e?.message || 'Network error');
     }
     setLoading(false);
+  };
+
+  const testConnection = async () => {
+    if (!testUrl.trim()) return;
+    setTesting(true);
+    setTestResult(null);
+    try {
+      const res = await fetch('/api/setup/test-connection', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mongoUrl: testUrl.trim() }),
+        cache: 'no-store',
+      });
+      const json = await res.json();
+      setTestResult(json);
+    } catch (e) {
+      setTestResult({ success: false, message: 'خطأ شبكة: ' + e?.message });
+    }
+    setTesting(false);
   };
 
   useEffect(() => { runSetup(); }, []);
@@ -121,7 +146,17 @@ export default function SetupDiagnosticPage() {
 
             {/* Database Status */}
             <div className="bg-zinc-900/50 border border-zinc-700 rounded-xl p-6 mb-6">
-              <h3 className="text-lg font-bold mb-4 text-[#d4af37]">🗄️ Database Connection</h3>
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-bold text-[#d4af37]">🗄️ Database Connection</h3>
+                {!dbConnected && (
+                  <button
+                    onClick={() => setShowTester(!showTester)}
+                    className="text-xs bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-400 px-3 py-1.5 rounded-lg border border-cyan-500/40"
+                  >
+                    🔧 اختبار MONGO_URL يدوياً
+                  </button>
+                )}
+              </div>
               <div className={`p-4 rounded-lg border ${dbConnected ? 'bg-emerald-500/10 border-emerald-500/40' : 'bg-red-500/10 border-red-500/40'}`}>
                 <p className="text-lg font-bold mb-2">
                   {dbConnected ? '✅ متصل بنجاح' : '❌ غير متصل'}
@@ -142,7 +177,104 @@ export default function SetupDiagnosticPage() {
                     )}
                   </div>
                 )}
+                {!dbConnected && mongoSet && !data?.database?.hint && (
+                  <p className="text-sm text-amber-300">⚠️ MONGO_URL مضافة لكن الاتصال فشل — جرّب اختبار يدوي أدناه ⬇️</p>
+                )}
               </div>
+
+              {/* ============ CONNECTION TESTER ============ */}
+              {showTester && (
+                <div className="mt-4 bg-black/40 border-2 border-cyan-500/30 rounded-xl p-5">
+                  <h4 className="text-base font-bold text-cyan-400 mb-2 flex items-center gap-2">
+                    🔧 اختبار MONGO_URL يدوياً
+                  </h4>
+                  <p className="text-xs text-gray-400 mb-3 leading-relaxed">
+                    الصق هنا الـ Connection String من MongoDB Atlas (بعد استبدال &lt;db_password&gt; بكلمة السر الفعلية).
+                    سنحاول الاتصال ونعطيك الخطأ الدقيق فوراً <strong className="text-amber-300">بدون حفظه</strong>.
+                  </p>
+                  <div className="space-y-2">
+                    <textarea
+                      value={testUrl}
+                      onChange={(e) => setTestUrl(e.target.value)}
+                      placeholder="mongodb+srv://USER:PASSWORD@cluster0.xxxxx.mongodb.net/?retryWrites=true&w=majority"
+                      rows={3}
+                      className="w-full bg-zinc-900 border border-zinc-700 rounded-lg p-3 text-xs font-mono text-white placeholder-gray-600 focus:border-cyan-500 outline-none"
+                      dir="ltr"
+                    />
+                    <button
+                      onClick={testConnection}
+                      disabled={testing || !testUrl.trim()}
+                      className="w-full bg-cyan-500 hover:bg-cyan-400 disabled:opacity-50 disabled:cursor-not-allowed text-black font-bold py-3 rounded-lg transition-all"
+                    >
+                      {testing ? '⏳ جاري الاتصال...' : '🚀 اختبر الاتصال'}
+                    </button>
+                  </div>
+
+                  {/* Test Result */}
+                  {testResult && (
+                    <div className={`mt-4 p-4 rounded-lg border-2 ${
+                      testResult.success
+                        ? 'bg-emerald-500/10 border-emerald-500/50'
+                        : 'bg-red-500/10 border-red-500/50'
+                    }`}>
+                      <p className={`font-bold mb-2 whitespace-pre-line text-sm ${testResult.success ? 'text-emerald-400' : 'text-red-400'}`}>
+                        {testResult.message}
+                      </p>
+
+                      {testResult.success && (
+                        <div className="mt-3 space-y-2 text-xs">
+                          <p className="text-emerald-300">⏱️ زمن الاتصال: {testResult.connectionTimeMs}ms</p>
+                          {testResult.databases?.length > 0 && (
+                            <p className="text-emerald-300">📚 قواعد البيانات الموجودة: {testResult.databases.join(', ')}</p>
+                          )}
+                          <div className="mt-3 p-3 bg-emerald-500/5 rounded border border-emerald-500/30">
+                            <p className="text-emerald-300 font-bold mb-2">🎯 الخطوة التالية:</p>
+                            <ol className="text-emerald-200 text-xs space-y-1 list-decimal list-inside">
+                              <li>افتح Vercel Dashboard → Settings → Environment Variables</li>
+                              <li>حدّث قيمة <code className="bg-black/40 px-1 py-0.5 rounded">MONGO_URL</code> بهذا الرابط بالضبط</li>
+                              <li>اعمل Redeploy</li>
+                              <li>ارجع لهذه الصفحة وتأكد من ✅</li>
+                            </ol>
+                          </div>
+                        </div>
+                      )}
+
+                      {!testResult.success && (
+                        <>
+                          {testResult.errorType && (
+                            <p className="text-[10px] text-red-400 mt-2 font-mono">نوع الخطأ: {testResult.errorType}</p>
+                          )}
+                          {testResult.masked && (
+                            <p className="text-[10px] text-gray-400 mt-1 font-mono break-all">الرابط: {testResult.masked}</p>
+                          )}
+                          {testResult.rawError && (
+                            <details className="mt-2">
+                              <summary className="text-[10px] text-gray-500 cursor-pointer hover:text-gray-300">📄 عرض الخطأ التقني الأصلي</summary>
+                              <pre className="mt-2 p-2 bg-black/60 rounded text-[10px] text-red-300 overflow-auto whitespace-pre-wrap break-all">
+                                {testResult.rawError}
+                              </pre>
+                            </details>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Quick tips */}
+                  <details className="mt-4 text-xs text-gray-400">
+                    <summary className="cursor-pointer hover:text-gray-200">💡 نصائح للحصول على الرابط الصحيح</summary>
+                    <ul className="mt-2 mr-3 space-y-1.5 list-disc list-inside text-gray-400">
+                      <li>اذهب إلى MongoDB Atlas → Database → Connect → Drivers</li>
+                      <li>اختر Node.js, Version 5.5+</li>
+                      <li>انسخ الرابط كاملاً</li>
+                      <li><strong className="text-amber-300">استبدل &lt;db_password&gt; بكلمة السر الفعلية</strong></li>
+                      <li>إذا كلمة السر فيها رموز خاصة (#, @, !, $) لازم URL-encoded</li>
+                      <li>تأكد من إضافة 0.0.0.0/0 في Network Access</li>
+                    </ul>
+                  </details>
+                </div>
+              )}
+
               {data.collections && Object.keys(data.collections).length > 0 && (
                 <div className="mt-4 grid grid-cols-2 md:grid-cols-4 gap-2">
                   {Object.entries(data.collections).map(([name, count]) => (

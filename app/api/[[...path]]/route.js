@@ -1124,6 +1124,119 @@ async function handle(request, params) {
   }
 
   // ============ 🔧 SETUP & HEALTH DIAGNOSTICS (Vercel-ready) ============
+
+  // POST /api/setup/test-connection — try a MONGO_URL without saving it. Returns precise error.
+  // This works even when db is null (no global DB), since it creates its own connection.
+  if (path === 'setup/test-connection' && method === 'POST') {
+    try {
+      const body = await request.json().catch(() => ({}));
+      const mongoUrl = String(body.mongoUrl || '').trim();
+      if (!mongoUrl) return ok({ success: false, message: '❌ الرجاء إدخال MONGO_URL' });
+
+      // Mask password for safe echo
+      const masked = mongoUrl.replace(/:([^:@/]+)@/, ':****@');
+
+      // Validate format basics
+      const validations = {
+        startsWithMongo: mongoUrl.startsWith('mongodb://') || mongoUrl.startsWith('mongodb+srv://'),
+        isAtlas: mongoUrl.startsWith('mongodb+srv://'),
+        hasUser: /:\/\/([^:@]+):/.test(mongoUrl),
+        hasPassword: /:\/\/[^:@]+:([^@]+)@/.test(mongoUrl),
+        containsAngleBrackets: mongoUrl.includes('<') || mongoUrl.includes('>'),
+        passwordIsLiteralPlaceholder: /:<(db_)?password>/i.test(mongoUrl),
+      };
+
+      // Critical: <db_password> not replaced
+      if (validations.passwordIsLiteralPlaceholder) {
+        return ok({
+          success: false,
+          masked,
+          validations,
+          errorType: 'PLACEHOLDER_NOT_REPLACED',
+          message: '❌ كلمة السر لم تُستبدل! يحتوي الرابط على <db_password> الحرفي.\n\nالحل: استبدل <db_password> بكلمة السر الفعلية من MongoDB Atlas.',
+        });
+      }
+      if (validations.containsAngleBrackets) {
+        return ok({
+          success: false,
+          masked,
+          validations,
+          errorType: 'CONTAINS_PLACEHOLDERS',
+          message: '⚠️ الرابط يحتوي على < أو > — قد تكون متبقية من template MongoDB. أزلها واستبدلها بالقيم الفعلية.',
+        });
+      }
+      if (!validations.startsWithMongo) {
+        return ok({
+          success: false,
+          masked,
+          validations,
+          errorType: 'INVALID_FORMAT',
+          message: '❌ صيغة الرابط خاطئة — يجب أن يبدأ بـ mongodb:// أو mongodb+srv://',
+        });
+      }
+
+      // Try actual connection (with short timeout for Vercel-friendly response)
+      const testClient = new MongoClient(mongoUrl, {
+        serverSelectionTimeoutMS: 8000,
+        connectTimeoutMS: 8000,
+        socketTimeoutMS: 8000,
+        maxPoolSize: 1,
+      });
+      try {
+        const startTs = Date.now();
+        await testClient.connect();
+        const elapsed = Date.now() - startTs;
+        // List databases to fully verify access
+        const admin = testClient.db().admin();
+        const dbsList = await admin.listDatabases().catch(() => null);
+        await testClient.close();
+        return ok({
+          success: true,
+          masked,
+          validations,
+          connectionTimeMs: elapsed,
+          databases: dbsList?.databases?.map(d => d.name) || [],
+          message: `✅ نجح الاتصال! استغرق ${elapsed}ms. يمكنك الآن إضافة MONGO_URL في Vercel.`,
+        });
+      } catch (e) {
+        await testClient.close().catch(() => {});
+        const errMsg = String(e?.message || e);
+        const lo = errMsg.toLowerCase();
+        let hint = errMsg;
+        let errorType = 'CONNECTION_FAILED';
+        if (lo.includes('authentication failed') || lo.includes('bad auth')) {
+          errorType = 'WRONG_PASSWORD';
+          hint = '❌ **كلمة سر MongoDB خاطئة!**\n\n• تحقق من كلمة السر في MongoDB Atlas → Database Access\n• تأكد أن special characters مُرمّزة (مثال: # يصبح %23، @ يصبح %40)\n• جرّب إنشاء user جديد بكلمة سر بسيطة بدون رموز خاصة';
+        } else if (lo.includes('whitelist') || lo.includes('ip not in') || lo.includes('not allowed')) {
+          errorType = 'IP_NOT_WHITELISTED';
+          hint = '❌ **عنوان IP غير مسموح!**\n\nحل: MongoDB Atlas → Network Access → Add IP Address → Allow Access from Anywhere (0.0.0.0/0)';
+        } else if (lo.includes('enotfound') || lo.includes('getaddrinfo')) {
+          errorType = 'CLUSTER_NOT_FOUND';
+          hint = '❌ **اسم الـ Cluster خاطئ!**\n\nتأكد من نسخ الـ Connection String كاملاً من MongoDB Atlas → Connect → Drivers';
+        } else if (lo.includes('timeout') || lo.includes('timed out')) {
+          errorType = 'TIMEOUT';
+          hint = '⏱️ **انتهت مهلة الاتصال**\n\nأكثر سبب شائع: عنوان IP غير مسموح في MongoDB Atlas → Network Access. أضف 0.0.0.0/0 الآن.';
+        } else if (lo.includes('ssl') || lo.includes('tls')) {
+          errorType = 'SSL_ERROR';
+          hint = '🔐 **مشكلة SSL/TLS**\n\nتأكد من استخدام mongodb+srv:// (وليس mongodb://) لـ Atlas';
+        } else if (lo.includes('mongoparseerror') || lo.includes('invalid')) {
+          errorType = 'PARSE_ERROR';
+          hint = '❌ **صيغة الرابط خاطئة** — قد تحتوي على special characters غير مُرمّزة في كلمة السر.\n\nمثال: إذا كلمة السر فيها @ # / : ? فيجب ترميزها (URL encoding).';
+        }
+        return ok({
+          success: false,
+          masked,
+          validations,
+          errorType,
+          rawError: errMsg.substring(0, 500),
+          message: hint,
+        });
+      }
+    } catch (e) {
+      return ok({ success: false, message: 'خطأ غير متوقع: ' + (e?.message || ''), errorType: 'UNEXPECTED' });
+    }
+  }
+
   // GET /api/setup — runs auto-seed and reports state. Hit this once after deploying.
   if (path === 'setup' && (method === 'GET' || method === 'POST')) {
     const checks = {
