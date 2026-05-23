@@ -76,8 +76,12 @@ export default function TelegramBotPage() {
 
   const setupWebhook = async () => {
     const r = await api('telegram/setup-webhook', { method: 'POST' });
-    if (r.success) { toast.success('✅ تم ربط الويب هوك - البوت يعمل الآن'); load(); }
-    else toast.error('فشل: ' + (r.response?.description || ''));
+    if (r.success) {
+      toast.success(r.message || '✅ تم ربط الويب هوك - البوت يعمل الآن', { duration: 6000 });
+      load();
+    } else {
+      toast.error(r.message || ('فشل: ' + (r.response?.description || '')), { duration: 8000 });
+    }
   };
   const deleteWebhook = async () => {
     if (!confirm('إيقاف الويب هوك؟ سيتوقف البوت عن العمل')) return;
@@ -125,9 +129,44 @@ export default function TelegramBotPage() {
             <p className="text-xs text-muted-foreground">طلبات اليوم</p>
             <p className="font-bold neon-text text-2xl">{logs.filter(l => l.timestamp?.startsWith(new Date().toISOString().slice(0, 10))).length}</p>
           </div>
-          {webhookInfo?.result?.url && (
-            <div className="md:col-span-3 text-[10px] text-muted-foreground font-mono break-all p-2 bg-input/30 rounded">
-              🔗 {webhookInfo.result.url}
+          {webhookInfo?.result?.url && (() => {
+            const url = webhookInfo.result.url;
+            const isVercel = url.includes('vercel.app');
+            const isEmergent = url.includes('emergent.host');
+            const isLocal = url.includes('localhost') || url.includes('127.0.0.1');
+            const platformLabel = isVercel ? '🚀 Vercel' : isEmergent ? '⚡ Emergent' : isLocal ? '🏠 Local' : '🌐 مخصص';
+            const platformColor = isVercel ? 'text-cyan-400 border-cyan-500/40 bg-cyan-500/10' :
+                                   isEmergent ? 'text-amber-400 border-amber-500/40 bg-amber-500/10' :
+                                   isLocal ? 'text-red-400 border-red-500/40 bg-red-500/10' :
+                                   'text-gold border-gold/40 bg-input/30';
+            return (
+              <div className="md:col-span-3 space-y-2">
+                <div className={`flex items-center gap-2 p-3 rounded-lg border-2 ${platformColor}`}>
+                  <span className="text-lg font-bold">{platformLabel}</span>
+                  <span className="text-xs flex-1 text-right">
+                    {isVercel && 'البوت متصل بنسخة Vercel — Production جاهز'}
+                    {isEmergent && 'البوت متصل بنسخة Emergent — للاختبار'}
+                    {isLocal && '⚠️ البوت متصل بـ localhost — لن يعمل خارج جهازك'}
+                    {!isVercel && !isEmergent && !isLocal && 'البوت متصل بنطاق مخصص'}
+                  </span>
+                </div>
+                <div className="text-[10px] text-muted-foreground font-mono break-all p-2 bg-input/30 rounded">
+                  🔗 <strong>الـ Webhook URL:</strong> {url}
+                </div>
+                {webhookInfo.result.pending_update_count > 0 && (
+                  <p className="text-[10px] text-amber-400">⏳ في الانتظار: {webhookInfo.result.pending_update_count} رسالة</p>
+                )}
+                {webhookInfo.result.last_error_message && (
+                  <p className="text-[10px] text-red-400">❌ آخر خطأ: {webhookInfo.result.last_error_message}</p>
+                )}
+              </div>
+            );
+          })()}
+          {!webhookInfo?.result?.url && (
+            <div className="md:col-span-3 p-3 rounded-lg border-2 border-amber-500/40 bg-amber-500/10">
+              <p className="text-amber-400 font-bold text-sm mb-1">⚠️ البوت غير مربوط بعد</p>
+              <p className="text-xs text-amber-200">اضغط زر <strong>"ربط الويب هوك"</strong> أعلاه ليبدأ البوت في استقبال الرسائل.</p>
+              <p className="text-[10px] text-amber-300 mt-1">📌 يجب أن يكون <code className="bg-amber-500/20 px-1 rounded">TELEGRAM_BOT_TOKEN</code> و <code className="bg-amber-500/20 px-1 rounded">NEXT_PUBLIC_BASE_URL</code> مضبوطين في Vercel أولاً.</p>
             </div>
           )}
         </CardContent>

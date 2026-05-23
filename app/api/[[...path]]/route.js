@@ -5244,15 +5244,59 @@ async function handle(request, params) {
   // Setup webhook
   if (path === 'telegram/setup-webhook' && method === 'POST') {
     const token = process.env.TELEGRAM_BOT_TOKEN;
-    if (!token) return err('TELEGRAM_BOT_TOKEN غير مضبوط في .env', 400);
-    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL;
-    if (!baseUrl) return err('NEXT_PUBLIC_BASE_URL غير مضبوط', 400);
+    if (!token) return err('⚠️ TELEGRAM_BOT_TOKEN غير مضبوط — يجب إضافته في Vercel Environment Variables ثم Redeploy', 400);
+
+    // 🌐 Auto-detect deployment URL (Vercel-friendly)
+    // Priority: explicit body.url > NEXT_PUBLIC_BASE_URL > VERCEL_URL > request origin
+    let body = {};
+    try { body = await getJsonBody(request); } catch {}
+    const baseUrl = body?.url
+      || process.env.NEXT_PUBLIC_BASE_URL
+      || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null)
+      || (() => { try { return new URL(request.url).origin; } catch { return null; } })();
+
+    if (!baseUrl) {
+      return err('⚠️ تعذّر اكتشاف عنوان الموقع — يجب ضبط NEXT_PUBLIC_BASE_URL في Vercel', 400);
+    }
+
+    // Validate format
+    if (!baseUrl.startsWith('https://')) {
+      return err(`⚠️ Telegram يتطلب HTTPS — العنوان الحالي: ${baseUrl}`, 400);
+    }
+    if (baseUrl.includes('localhost') || baseUrl.includes('127.0.0.1')) {
+      return err('⚠️ لا يمكن ربط الويب هوك مع localhost — يجب نشر المشروع على Vercel أولاً', 400);
+    }
+
     const webhookUrl = `${baseUrl}/api/telegram/webhook`;
     const r = await fetch(`https://api.telegram.org/bot${token}/setWebhook`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url: webhookUrl, allowed_updates: ['message', 'callback_query'] }),
+      body: JSON.stringify({
+        url: webhookUrl,
+        allowed_updates: ['message', 'callback_query'],
+        drop_pending_updates: true, // Clear stale updates from polling
+      }),
     }).then(r => r.json()).catch(e => ({ ok: false, error: e.message }));
-    return ok({ success: r.ok, response: r, webhookUrl });
+
+    // Persist for later inspection
+    try {
+      await db.collection('settings').updateOne(
+        {},
+        { $set: { 'telegram.webhookUrl': webhookUrl, 'telegram.webhookSetAt': new Date().toISOString() } },
+        { upsert: true }
+      );
+    } catch {}
+
+    return ok({
+      success: r.ok,
+      response: r,
+      webhookUrl,
+      detectedFrom: body?.url ? 'request_body' :
+                    process.env.NEXT_PUBLIC_BASE_URL ? 'NEXT_PUBLIC_BASE_URL' :
+                    process.env.VERCEL_URL ? 'VERCEL_URL' : 'request_origin',
+      message: r.ok
+        ? `✅ تم ربط البوت بنجاح بـ ${webhookUrl}\nالبوت الآن سيستقبل الرسائل على هذا الرابط مباشرةً.`
+        : `❌ فشل الربط: ${r.description || JSON.stringify(r)}`,
+    });
   }
 
   // Get webhook info
