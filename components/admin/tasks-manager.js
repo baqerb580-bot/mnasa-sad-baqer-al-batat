@@ -39,7 +39,7 @@ export default function TasksManager() {
   const [open, setOpen] = useState(false);
   const [reviewTask, setReviewTask] = useState(null);
   const [mapTask, setMapTask] = useState(null);
-  const blank = { title: '', description: '', priority: 'medium', dueDate: new Date().toISOString().slice(0, 10), assignedTo: '', notes: '', status: 'pending', progress: 0, attachments: [], taskType: 'general', subscriberId: '', subscriberName: '', subscriberPhone: '', subscriberAddress: '', subscriberLat: null, subscriberLng: null, faultDescription: '', recurrence: { enabled: false, type: 'weekly', interval: 1, endDate: '' } };
+  const blank = { title: '', description: '', priority: 'medium', dueDate: new Date().toISOString().slice(0, 10), assignedTo: '', assignees: [], notes: '', status: 'pending', progress: 0, attachments: [], taskType: 'general', subscriberId: '', subscriberName: '', subscriberPhone: '', subscriberAddress: '', subscriberLat: null, subscriberLng: null, faultDescription: '', recurrence: { enabled: false, type: 'weekly', interval: 1, endDate: '' } };
   const [form, setForm] = useState(blank);
   const [subSearch, setSubSearch] = useState('');
   const [subResults, setSubResults] = useState([]);
@@ -83,14 +83,53 @@ export default function TasksManager() {
     : items.filter(t => t.status === statusFilter);
 
   const save = async () => {
-    if (!form.title || !form.assignedTo) { toast.error('العنوان والموظف مطلوبان'); return; }
+    // Build final assignee list: if multi-selection used, use that; else single
+    const finalAssignees = form.assignees && form.assignees.length > 0
+      ? form.assignees
+      : (form.assignedTo ? [form.assignedTo] : []);
+
+    if (!form.title || finalAssignees.length === 0) {
+      toast.error('العنوان واختيار موظف (أو أكثر) مطلوبان');
+      return;
+    }
     if (form.taskType === 'subscriber_repair' && !form.subscriberId) {
       toast.error('اختر المشترك من القائمة');
       return;
     }
-    const emp = employees.find(e => e.id === form.assignedTo);
-    await api('tasks', { method: 'POST', body: JSON.stringify({ ...form, assignedToName: emp?.name, createdBy: 'المدير', createdById: 'manager' }) });
-    toast.success('✅ تم إنشاء المهمة وإرسال إشعار للموظف'); setOpen(false); setForm(blank); load();
+
+    // Single assignee → existing behavior
+    if (finalAssignees.length === 1) {
+      const emp = employees.find(e => e.id === finalAssignees[0]);
+      await api('tasks', { method: 'POST', body: JSON.stringify({
+        ...form,
+        assignedTo: emp?.id,
+        assignedToName: emp?.name,
+        assignees: [emp?.id],
+        assigneesNames: [emp?.name],
+        createdBy: 'المدير', createdById: 'manager',
+      }) });
+      toast.success('✅ تم إنشاء المهمة وإرسال إشعار للموظف');
+    } else {
+      // Multiple assignees → create one task per employee (so each has their own status/progress)
+      const assigneesNames = finalAssignees.map(id => employees.find(e => e.id === id)?.name).filter(Boolean);
+      let created = 0;
+      for (const empId of finalAssignees) {
+        const emp = employees.find(e => e.id === empId);
+        if (!emp) continue;
+        await api('tasks', { method: 'POST', body: JSON.stringify({
+          ...form,
+          assignedTo: emp.id,
+          assignedToName: emp.name,
+          assignees: finalAssignees,                    // ← all teammates for visibility
+          assigneesNames,                                // ← all names
+          isGroupTask: true,                             // ← marker for UI
+          createdBy: 'المدير', createdById: 'manager',
+        }) });
+        created++;
+      }
+      toast.success(`✅ تم إنشاء المهمة لـ ${created} موظفين وإرسال إشعارات`);
+    }
+    setOpen(false); setForm(blank); load();
   };
   const remove = async (id) => { await api(`tasks/${id}`, { method: 'DELETE' }); toast.success('تم الحذف'); load(); };
 
@@ -164,6 +203,14 @@ export default function TasksManager() {
 
               <div className="flex justify-between text-[10px]">
                 <span className="text-cyan-400">👤 {t.assignedToName}</span>
+                {t.isGroupTask && (t.assigneesNames?.length > 1) && (
+                  <Badge
+                    className="bg-cyan-500/20 text-cyan-300 border-cyan-500/40 text-[9px] cursor-help"
+                    title={`مهمة جماعية مُسندة لـ:\n${t.assigneesNames.join('\n')}`}
+                  >
+                    👥 جماعية ({t.assigneesNames.length})
+                  </Badge>
+                )}
                 <span className="text-muted-foreground">📅 {t.dueDate}</span>
               </div>
 
@@ -377,11 +424,74 @@ export default function TasksManager() {
             <div className="grid grid-cols-2 gap-3">
               <div className="col-span-2"><Label>عنوان المهمة</Label><Input value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} className="bg-input/30 border-gold/20" /></div>
               <div className="col-span-2"><Label>{form.taskType === 'subscriber_repair' ? 'تعليمات إضافية للفني' : 'الوصف'}</Label><Textarea value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} className="bg-input/30 border-gold/20 h-20" /></div>
-              <div><Label>{form.taskType === 'subscriber_repair' ? 'الفني المسؤول' : 'الموظف المسؤول'}</Label>
-                <Select value={form.assignedTo} onValueChange={v => setForm({ ...form, assignedTo: v })}>
-                  <SelectTrigger className="bg-input/30 border-gold/20"><SelectValue placeholder="اختر موظف" /></SelectTrigger>
-                  <SelectContent>{employees.map(e => <SelectItem key={e.id} value={e.id}>{e.photo} {e.name}</SelectItem>)}</SelectContent>
-                </Select>
+              <div className="col-span-2">
+                <Label className="flex items-center justify-between mb-2">
+                  <span>{form.taskType === 'subscriber_repair' ? 'الفني المسؤول' : 'الموظف المسؤول'}</span>
+                  {form.taskType !== 'subscriber_repair' && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const newMulti = !form._multiMode;
+                        if (newMulti) {
+                          // Switch to multi: pre-select current single if any
+                          setForm({ ...form, _multiMode: true, assignees: form.assignedTo ? [form.assignedTo] : [] });
+                        } else {
+                          // Switch back to single: take first from list
+                          setForm({ ...form, _multiMode: false, assignedTo: (form.assignees && form.assignees[0]) || '', assignees: [] });
+                        }
+                      }}
+                      className="text-[10px] text-cyan-400 hover:text-cyan-300 underline"
+                    >
+                      {form._multiMode ? '← العودة لاختيار موظف واحد' : '👥 إسناد لعدة موظفين →'}
+                    </button>
+                  )}
+                </Label>
+
+                {form._multiMode ? (
+                  <div className="p-2 rounded-lg bg-cyan-500/5 border-2 border-cyan-500/30">
+                    <p className="text-[10px] text-cyan-300 mb-2">اختر موظف واحد أو أكثر:</p>
+                    <div className="grid grid-cols-2 gap-1.5 max-h-44 overflow-auto">
+                      {employees.map(e => {
+                        const checked = form.assignees?.includes(e.id);
+                        return (
+                          <label
+                            key={e.id}
+                            className={`flex items-center gap-1.5 p-1.5 rounded cursor-pointer transition-all ${
+                              checked
+                                ? 'bg-cyan-500/20 border border-cyan-500/50'
+                                : 'bg-input/30 border border-gold/20 hover:border-cyan-500/40'
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={!!checked}
+                              onChange={(ev) => {
+                                const next = new Set(form.assignees || []);
+                                if (ev.target.checked) next.add(e.id);
+                                else next.delete(e.id);
+                                setForm({ ...form, assignees: Array.from(next) });
+                              }}
+                              className="w-3.5 h-3.5 accent-cyan-500"
+                            />
+                            <span className="text-xs">{e.photo} {e.name}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                    {form.assignees?.length > 0 ? (
+                      <p className="text-[10px] text-cyan-400 mt-2 font-bold">
+                        ✅ تم اختيار {form.assignees.length} موظف{form.assignees.length > 1 ? 'ين' : ''} — سيتم إنشاء مهمة منفصلة لكل واحد بإشعار خاص
+                      </p>
+                    ) : (
+                      <p className="text-[10px] text-amber-400 mt-2">⚠️ لم يتم اختيار أي موظف بعد</p>
+                    )}
+                  </div>
+                ) : (
+                  <Select value={form.assignedTo} onValueChange={v => setForm({ ...form, assignedTo: v })}>
+                    <SelectTrigger className="bg-input/30 border-gold/20"><SelectValue placeholder="اختر موظف" /></SelectTrigger>
+                    <SelectContent>{employees.map(e => <SelectItem key={e.id} value={e.id}>{e.photo} {e.name}</SelectItem>)}</SelectContent>
+                  </Select>
+                )}
               </div>
               <div><Label>الأولوية</Label>
                 <Select value={form.priority} onValueChange={v => setForm({ ...form, priority: v })}>
