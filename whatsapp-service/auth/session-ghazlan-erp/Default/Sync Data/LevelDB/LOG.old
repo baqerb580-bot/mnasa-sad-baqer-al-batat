@@ -1,3 +1,3 @@
-2026/05/22-18:25:35.169 ae Reusing MANIFEST /app/whatsapp-service/auth/session-ghazlan-erp/Default/Sync Data/LevelDB/MANIFEST-000001
-2026/05/22-18:25:35.360 ae Recovering log #3
-2026/05/22-18:25:35.361 ae Reusing old log /app/whatsapp-service/auth/session-ghazlan-erp/Default/Sync Data/LevelDB/000003.log 
+2026/05/22-22:42:59.568 1965 Reusing MANIFEST /app/whatsapp-service/auth/session-ghazlan-erp/Default/Sync Data/LevelDB/MANIFEST-000001
+2026/05/22-22:42:59.614 1965 Recovering log #3
+2026/05/22-22:42:59.615 1965 Reusing old log /app/whatsapp-service/auth/session-ghazlan-erp/Default/Sync Data/LevelDB/000003.log 

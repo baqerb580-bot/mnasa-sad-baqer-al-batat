@@ -217,11 +217,26 @@ export default function TasksManager() {
                     )}
                   </div>
                   <p className="line-clamp-2">{t.report.summary}</p>
-                  {/* Photo thumbnails */}
-                  {t.report.attachments?.filter(a => /\.(jpg|jpeg|png|webp|gif)$/i.test(a.url || a.name)).slice(0, 4).length > 0 && (
+                  {/* Photo thumbnails — supports /uploads/*.jpg AND /api/files/{id} URLs */}
+                  {t.report.attachments?.filter(a => {
+                    const url = a.url || a.name || '';
+                    const mime = a.mime || '';
+                    return /\.(jpg|jpeg|png|webp|gif)$/i.test(url) || url.includes('/api/files/') || mime.startsWith('image/');
+                  }).slice(0, 4).length > 0 && (
                     <div className="flex gap-1 mt-1">
-                      {t.report.attachments.filter(a => /\.(jpg|jpeg|png|webp|gif)$/i.test(a.url || a.name)).slice(0, 4).map((a, i) => (
-                        <img key={i} src={a.url} alt={a.name || 'photo'} className="w-12 h-12 object-cover rounded border border-purple-500/30 cursor-pointer hover:scale-110 transition-transform" onClick={() => setReviewTask(t)} />
+                      {t.report.attachments.filter(a => {
+                        const url = a.url || a.name || '';
+                        const mime = a.mime || '';
+                        return /\.(jpg|jpeg|png|webp|gif)$/i.test(url) || url.includes('/api/files/') || mime.startsWith('image/');
+                      }).slice(0, 4).map((a, i) => (
+                        <img
+                          key={i}
+                          src={a.url}
+                          alt={a.name || 'photo'}
+                          className="w-12 h-12 object-cover rounded border border-purple-500/30 cursor-pointer hover:scale-110 transition-transform"
+                          onClick={() => setReviewTask(t)}
+                          onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                        />
                       ))}
                     </div>
                   )}

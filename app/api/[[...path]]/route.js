@@ -4348,7 +4348,10 @@ async function handle(request, params) {
     return ok({ success: true });
   }
 
-  // ============ FILE UPLOAD (multipart) ============
+  // ============ FILE UPLOAD (multipart) → MongoDB Base64 (Vercel-compatible) ============
+  // 🚀 STORAGE STRATEGY: We store uploads as Base64 in MongoDB `uploads` collection.
+  //    This works on Vercel (read-only filesystem) AND locally.
+  //    Files served via GET /api/files/{id}
   if (path === 'upload' && method === 'POST') {
     try {
       let form;
@@ -4356,18 +4359,84 @@ async function handle(request, params) {
       catch { return err('لم يتم إرسال ملف', 400); }
       const file = form.get('file');
       if (!file || typeof file === 'string') return err('لم يتم إرسال ملف', 400);
+
       const buf = Buffer.from(await file.arrayBuffer());
-      const fs = await import('fs');
-      const pathMod = await import('path');
-      const uploadsDir = pathMod.join(process.cwd(), 'public', 'uploads');
-      if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
-      const ext = (file.name || '').split('.').pop() || 'bin';
-      const filename = `${uuidv4()}.${ext}`;
-      fs.writeFileSync(pathMod.join(uploadsDir, filename), buf);
-      const url = `/uploads/${filename}`;
-      return ok({ success: true, url, name: file.name, size: buf.length });
+      const size = buf.length;
+      // Limit to 8MB to stay safe under MongoDB 16MB doc limit (Base64 inflates by ~33%)
+      if (size > 8 * 1024 * 1024) {
+        return err('الملف كبير جداً (الحد الأقصى 8 ميجابايت)', 413);
+      }
+      const mime = file.type || 'application/octet-stream';
+      const name = file.name || 'upload';
+      const ext = (name.split('.').pop() || 'bin').toLowerCase();
+
+      // Detect if we're on Vercel/serverless (no writable FS)
+      const isReadOnlyFs = !!process.env.VERCEL || process.env.NODE_ENV === 'production';
+
+      const id = uuidv4();
+      const fileDoc = {
+        id,
+        name,
+        mime,
+        size,
+        ext,
+        // Always store Base64 in MongoDB for cross-platform compatibility
+        data: buf.toString('base64'),
+        uploadedAt: new Date().toISOString(),
+      };
+      await db.collection('uploads').insertOne(fileDoc);
+
+      // Try to ALSO write to disk locally (faster CDN-style serving) — but never fail if it can't
+      if (!isReadOnlyFs) {
+        try {
+          const fs = await import('fs');
+          const pathMod = await import('path');
+          const uploadsDir = pathMod.join(process.cwd(), 'public', 'uploads');
+          if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
+          const filename = `${id}.${ext}`;
+          fs.writeFileSync(pathMod.join(uploadsDir, filename), buf);
+        } catch (fsErr) {
+          // Silent fail — MongoDB copy is the source of truth
+          console.warn('[upload] disk write skipped:', fsErr?.message);
+        }
+      }
+
+      // Return URL that works on ANY platform (served by /api/files/{id})
+      const url = `/api/files/${id}`;
+      return ok({ success: true, url, id, name, size, mime });
     } catch (e) {
+      console.error('[upload] failed:', e);
       return err('فشل الرفع: ' + e.message, 500);
+    }
+  }
+
+  // ============ FILE SERVE: GET /api/files/{id} → return binary from MongoDB ============
+  if (path.startsWith('files/') && method === 'GET') {
+    try {
+      const id = path.substring('files/'.length);
+      if (!id) return err('معرّف الملف مطلوب', 400);
+      // Strip extension if present (so both /api/files/uuid and /api/files/uuid.jpg work)
+      const cleanId = id.split('.')[0];
+      const doc = await db.collection('uploads').findOne({ id: cleanId });
+      if (!doc || !doc.data) {
+        return new Response(JSON.stringify({ error: 'الملف غير موجود' }), {
+          status: 404,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      const buf = Buffer.from(doc.data, 'base64');
+      return new Response(buf, {
+        status: 200,
+        headers: {
+          'Content-Type': doc.mime || 'application/octet-stream',
+          'Content-Length': String(buf.length),
+          'Cache-Control': 'public, max-age=31536000, immutable',
+          'Content-Disposition': `inline; filename="${doc.name || cleanId}"`,
+        },
+      });
+    } catch (e) {
+      console.error('[files] serve failed:', e);
+      return err('خطأ في جلب الملف', 500);
     }
   }
 

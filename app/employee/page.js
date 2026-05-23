@@ -47,9 +47,25 @@ const api = async (path, opts = {}) => {
   return r.json();
 };
 const uploadFile = async (file) => {
-  const fd = new FormData(); fd.append('file', file);
-  const r = await fetch('/api/upload', { method: 'POST', body: fd, headers: { 'X-Emp-Token': getToken() } });
-  return r.json();
+  try {
+    const fd = new FormData();
+    fd.append('file', file);
+    const r = await fetch('/api/upload', {
+      method: 'POST',
+      body: fd,
+      headers: { 'X-Emp-Token': getToken() }, // ⚠️ Don't set Content-Type — browser sets multipart boundary
+    });
+    if (!r.ok) {
+      const text = await r.text().catch(() => '');
+      let json = {}; try { json = JSON.parse(text); } catch {}
+      throw new Error(json?.error || `فشل الرفع (HTTP ${r.status})`);
+    }
+    const data = await r.json();
+    if (!data.success || !data.url) throw new Error(data?.error || 'لم يتم استلام رابط الصورة');
+    return data;
+  } catch (e) {
+    return { error: e?.message || 'فشل رفع الصورة — تحقق من الاتصال' };
+  }
 };
 
 // ============================== LOGIN ==============================
@@ -411,7 +427,7 @@ function CompleteDialog({ task, open, onClose, onSubmit }) {
     for (const f of list) {
       const r = await uploadFile(f);
       if (r.error) toast.error('فشل رفع: ' + f.name);
-      else setFiles(prev => [...prev, { url: r.url, name: r.name, size: r.size }]);
+      else setFiles(prev => [...prev, { url: r.url, name: r.name, size: r.size, mime: r.mime }]);
     }
     setUploading(false);
     if (fileRef.current) fileRef.current.value = '';
@@ -452,17 +468,27 @@ function CompleteDialog({ task, open, onClose, onSubmit }) {
             </Button>
             {files.length > 0 && (
               <div className="grid grid-cols-3 gap-2 mt-2">
-                {files.map((f, i) => (
-                  <div key={i} className="relative p-2 rounded-lg bg-input/30 border border-gold/20 group">
-                    {f.url.match(/\.(jpg|jpeg|png|webp|gif)$/i) ? (
-                      <img src={f.url} alt={f.name} className="w-full h-20 object-cover rounded" />
-                    ) : (
-                      <div className="w-full h-20 flex items-center justify-center"><FileText className="w-8 h-8 text-cyan-400" /></div>
-                    )}
-                    <p className="text-[9px] truncate mt-1">{f.name}</p>
-                    <button onClick={() => removeFile(i)} className="absolute top-1 right-1 bg-red-500 rounded-full w-5 h-5 flex items-center justify-center opacity-0 group-hover:opacity-100"><X className="w-3 h-3 text-white" /></button>
-                  </div>
-                ))}
+                {files.map((f, i) => {
+                  const url = f.url || '';
+                  const mime = f.mime || '';
+                  const isImage = /\.(jpg|jpeg|png|webp|gif)$/i.test(url) || url.includes('/api/files/') || mime.startsWith('image/');
+                  return (
+                    <div key={i} className="relative p-2 rounded-lg bg-input/30 border border-gold/20 group">
+                      {isImage ? (
+                        <img
+                          src={f.url}
+                          alt={f.name}
+                          className="w-full h-20 object-cover rounded"
+                          onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                        />
+                      ) : (
+                        <div className="w-full h-20 flex items-center justify-center"><FileText className="w-8 h-8 text-cyan-400" /></div>
+                      )}
+                      <p className="text-[9px] truncate mt-1">{f.name}</p>
+                      <button onClick={() => removeFile(i)} className="absolute top-1 right-1 bg-red-500 rounded-full w-5 h-5 flex items-center justify-center opacity-0 group-hover:opacity-100"><X className="w-3 h-3 text-white" /></button>
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>

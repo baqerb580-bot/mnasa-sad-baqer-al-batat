@@ -1,3 +1,6 @@
-2026/05/22-18:25:35.396 d7 Reusing MANIFEST /app/whatsapp-service/auth/session-ghazlan-erp/Default/Local Storage/leveldb/MANIFEST-000001
-2026/05/22-18:25:35.399 d7 Recovering log #3
-2026/05/22-18:25:35.400 d7 Reusing old log /app/whatsapp-service/auth/session-ghazlan-erp/Default/Local Storage/leveldb/000003.log 
+2026/05/22-22:42:59.603 198f Reusing MANIFEST /app/whatsapp-service/auth/session-ghazlan-erp/Default/Local Storage/leveldb/MANIFEST-000001
+2026/05/22-22:42:59.615 198f Recovering log #3
+2026/05/22-22:42:59.616 198f Reusing old log /app/whatsapp-service/auth/session-ghazlan-erp/Default/Local Storage/leveldb/000003.log 
+2026/05/22-23:02:00.965 1991 Level-0 table #5: started
+2026/05/22-23:02:00.972 1991 Level-0 table #5: 21846 bytes OK
+2026/05/22-23:02:00.975 1991 Delete type=0 #3

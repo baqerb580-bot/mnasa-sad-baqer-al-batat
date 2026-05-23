@@ -74,18 +74,28 @@ export function TaskReviewDialog({ task, onClose, onDone }) {
                 <div>
                   <p className="text-[10px] text-muted-foreground mb-1">📎 المرفقات ({task.report.attachments.length}):</p>
                   <div className="grid grid-cols-4 gap-2">
-                    {task.report.attachments.map((f, i) => (
-                      <a key={i} href={f.url} target="_blank" rel="noreferrer" className="block">
-                        {f.url?.match(/\.(jpg|jpeg|png|webp|gif)$/i) ? (
-                          <img src={f.url} alt={f.name} className="w-full h-16 object-cover rounded border border-gold/20" />
-                        ) : (
-                          <div className="w-full h-16 flex items-center justify-center bg-input/30 rounded border border-gold/20">
-                            <FileText className="w-6 h-6 text-cyan-400" />
-                          </div>
-                        )}
-                        <p className="text-[9px] truncate mt-1">{f.name}</p>
-                      </a>
-                    ))}
+                    {task.report.attachments.map((f, i) => {
+                      const url = f.url || '';
+                      const mime = f.mime || '';
+                      const isImage = /\.(jpg|jpeg|png|webp|gif)$/i.test(url) || url.includes('/api/files/') || mime.startsWith('image/');
+                      return (
+                        <a key={i} href={f.url} target="_blank" rel="noreferrer" className="block">
+                          {isImage ? (
+                            <img
+                              src={f.url}
+                              alt={f.name}
+                              className="w-full h-16 object-cover rounded border border-gold/20"
+                              onError={(e) => { e.currentTarget.outerHTML = `<div class="w-full h-16 flex items-center justify-center bg-amber-500/10 border border-amber-500/30 rounded text-[9px] text-amber-400">⚠️ غير متاح</div>`; }}
+                            />
+                          ) : (
+                            <div className="w-full h-16 flex items-center justify-center bg-input/30 rounded border border-gold/20">
+                              <FileText className="w-6 h-6 text-cyan-400" />
+                            </div>
+                          )}
+                          <p className="text-[9px] truncate mt-1">{f.name}</p>
+                        </a>
+                      );
+                    })}
                   </div>
                 </div>
               )}
