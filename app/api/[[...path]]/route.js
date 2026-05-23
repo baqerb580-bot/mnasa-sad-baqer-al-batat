@@ -208,6 +208,51 @@ const SETTINGS_DEFAULTS = {
   },
 };
 
+// ============ TIMEZONE HELPERS (Asia/Baghdad) ============
+// 🌍 IMPORTANT: Vercel servers run in UTC. We MUST compute dates/times in Baghdad
+// timezone for attendance to work correctly. These helpers are timezone-safe.
+const APP_TZ = process.env.APP_TIMEZONE || 'Asia/Baghdad';
+
+function getTzParts(d = new Date(), tz = APP_TZ) {
+  const fmt = new Intl.DateTimeFormat('en-CA', {
+    timeZone: tz,
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+    hour12: false,
+  });
+  const out = {};
+  for (const p of fmt.formatToParts(d)) {
+    if (p.type !== 'literal') out[p.type] = p.value;
+  }
+  if (out.hour === '24') out.hour = '00';
+  return out;
+}
+
+// "YYYY-MM-DD" for the current date in APP_TZ (correct around midnight)
+function getLocalDateString(d = new Date()) {
+  const p = getTzParts(d);
+  return `${p.year}-${p.month}-${p.day}`;
+}
+
+// "HH:MM" 24h for the current time in APP_TZ
+function getLocalHM(d = new Date()) {
+  const p = getTzParts(d);
+  return `${p.hour}:${p.minute}`;
+}
+
+// Total minutes since 00:00 in APP_TZ (e.g., 8:15 → 495)
+function getLocalMinutes(d = new Date()) {
+  const p = getTzParts(d);
+  return parseInt(p.hour, 10) * 60 + parseInt(p.minute, 10);
+}
+
+// Parse "HH:MM" or "H:MM" → minutes since midnight
+function shiftToMinutes(shift) {
+  const m = String(shift || '08:00').match(/^(\d{1,2}):(\d{2})$/);
+  if (!m) return 8 * 60;
+  return parseInt(m[1], 10) * 60 + parseInt(m[2], 10);
+}
+
 // ============ MONGO CONNECTION (Serverless-Safe / Vercel-Ready) ============
 // Use globalThis cache to survive across hot-reloads + serverless function reuses.
 // Returns null on failure instead of throwing → endpoints handle gracefully.
@@ -4001,16 +4046,25 @@ async function handle(request, params) {
     const emp = await db.collection('employees').findOne({ id: employeeId });
     if (!emp) return err('الموظف غير موجود', 404);
     if (!photoUrl) return err('صورة الحضور إلزامية - يرجى التقاط صورة', 400);
-    const today = new Date().toISOString().slice(0, 10);
+
+    // 🌍 Use Baghdad timezone (Asia/Baghdad) — works correctly on Vercel (UTC)
+    const now = new Date();
+    const today = getLocalDateString(now);        // YYYY-MM-DD in Baghdad
+    const localHM = getLocalHM(now);              // HH:MM in Baghdad
+    const localMinutes = getLocalMinutes(now);    // minutes since midnight in Baghdad
+
     const existing = await db.collection('attendance').findOne({ employeeId, date: today });
     if (existing && existing.checkIn) return err('تم تسجيل الحضور مسبقاً اليوم', 400);
-    const now = new Date();
+
     const settings = await db.collection('settings').findOne({ id: 'system' });
     const empSettings = settings?.employees || {};
     const globalShiftStart = empSettings.workStart || '08:00';
-    const [shiftH, shiftM] = (emp.shiftStart || globalShiftStart).split(':').map(Number);
-    const shiftStart = new Date(now); shiftStart.setHours(shiftH, shiftM, 0, 0);
-    const lateMinutes = Math.max(0, Math.floor((now - shiftStart) / 60000));
+    // Use per-employee shift OR global default
+    const shiftStartStr = emp.shiftStart || globalShiftStart;
+    const shiftStartMinutes = shiftToMinutes(shiftStartStr);
+
+    // ⚖️ Late = checked in AFTER shift start (in Baghdad time, not server time!)
+    const lateMinutes = Math.max(0, localMinutes - shiftStartMinutes);
     const grace = empSettings.lateGraceMinutes ?? 10;
     const isLate = lateMinutes > grace;
     const autoEnabled = empSettings.autoDeductionEnabled !== false;
@@ -4019,18 +4073,26 @@ async function handle(request, params) {
     const perMinute = empSettings.lateDeductionPerMinute ?? 500;
     let deductionAmount = 0;
     if (isLate && autoEnabled) {
+      // Deduct only for minutes AFTER the grace period
+      const billableMinutes = Math.max(0, lateMinutes - grace);
       deductionAmount = mode === 'per_minute'
-        ? Math.max(0, (lateMinutes - grace)) * perMinute
+        ? billableMinutes * perMinute
         : fixedAmount;
     }
     const record = {
       id: uuidv4(),
       employeeId, employeeName: emp.name, date: today,
-      checkIn: now.toISOString(), checkOut: null,
+      checkIn: now.toISOString(),                          // UTC ISO for storage
+      checkInLocal: localHM,                                // 'HH:MM' Baghdad — for display
+      checkInLocalTime: `${today} ${localHM}`,              // 'YYYY-MM-DD HH:MM' Baghdad
+      checkInTimezone: APP_TZ,                              // for auditing
+      checkOut: null, checkOutLocal: null,
       checkInPhoto: photoUrl, checkOutPhoto: null,
       checkInLat: lat || null, checkInLng: lng || null,
+      shiftStart: shiftStartStr,                            // record the shift used
       lateMinutes, isLate, status: isLate ? 'late' : 'present',
       hoursWorked: 0, autoDeduction: deductionAmount, deductionMode: mode,
+      graceUsed: grace,
       createdAt: now.toISOString(),
     };
     if (deductionAmount > 0) {
@@ -4038,35 +4100,34 @@ async function handle(request, params) {
         id: uuidv4(), employeeId, employeeName: emp.name, type: 'deduction',
         amount: deductionAmount,
         reason: mode === 'per_minute'
-          ? `خصم تلقائي: تأخير ${lateMinutes} دقيقة × ${perMinute} د.ع/دقيقة`
-          : `خصم تلقائي: تأخير ${lateMinutes} دقيقة (مبلغ ثابت)`,
+          ? `خصم تلقائي: تأخير ${lateMinutes} دقيقة (بعد سماح ${grace}د) × ${perMinute} د.ع/دقيقة = ${deductionAmount.toLocaleString('en-US')} د.ع`
+          : `خصم تلقائي: تأخير ${lateMinutes} دقيقة - مبلغ ثابت ${fixedAmount.toLocaleString('en-US')} د.ع`,
         auto: true, date: today, createdAt: now.toISOString(),
       });
     }
     await db.collection('attendance').insertOne(record);
     await db.collection('employees').updateOne({ id: employeeId }, { $set: { attendance: record.status } });
-    await logActivity(db, { action: 'attendance_checkin', entity: 'attendance', entityId: record.id, user: emp.name, userId: emp.id, details: `حضور في ${now.toLocaleTimeString('ar-IQ')}${isLate ? ` (تأخير ${lateMinutes}د)` : ''}`, ip: clientIp });
-    const timeStr = now.toLocaleTimeString('ar-IQ', { hour: '2-digit', minute: '2-digit' });
+    await logActivity(db, { action: 'attendance_checkin', entity: 'attendance', entityId: record.id, user: emp.name, userId: emp.id, details: `حضور في ${localHM} (بغداد)${isLate ? ` - تأخير ${lateMinutes}د` : ''}`, ip: clientIp });
     if (isLate) {
       await notifyManager(db, {
         type: 'attendance_late',
         title: `⏰ تأخير: ${emp.name}`,
-        message: `بصم الحضور في ${timeStr}\nالتأخير: ${lateMinutes} دقيقة\nالخصم: ${deductionAmount.toLocaleString('en-US')} د.ع`,
+        message: `بصم الحضور في ${localHM} (بغداد)\nبدء الدوام: ${shiftStartStr}\nالتأخير: ${lateMinutes} دقيقة\nالخصم: ${deductionAmount.toLocaleString('en-US')} د.ع`,
         employeeId,
       });
     } else {
       await notifyManager(db, {
         type: 'attendance_checkin',
         title: `📍 حضور: ${emp.name}`,
-        message: `بصم الحضور في ${timeStr}`,
+        message: `بصم الحضور في ${localHM} (بغداد)`,
         employeeId,
       });
     }
     delete record._id;
-    // Real-time event
     await db.collection('events').insertOne({
       id: uuidv4(), type: isLate ? 'attendance_late' : 'attendance_checkin',
       employeeId, employeeName: emp.name, lateMinutes, isLate, deductionAmount,
+      checkInLocal: localHM,
       ts: now.toISOString(),
     });
     return ok({ success: true, record });
@@ -4076,40 +4137,77 @@ async function handle(request, params) {
   if (path === 'attendance/checkout' && method === 'POST') {
     const { employeeId, photoUrl, lat, lng } = await getJsonBody(request);
     if (!photoUrl) return err('صورة الانصراف إلزامية - يرجى التقاط صورة', 400);
-    const today = new Date().toISOString().slice(0, 10);
+
+    // 🌍 Baghdad timezone
+    const now = new Date();
+    const today = getLocalDateString(now);
+    const localHM = getLocalHM(now);
+    const localMinutes = getLocalMinutes(now);
+
     const existing = await db.collection('attendance').findOne({ employeeId, date: today });
     if (!existing) return err('لم تسجل حضور اليوم', 400);
     if (existing.checkOut) return err('تم تسجيل الانصراف مسبقاً', 400);
-    const now = new Date();
+
     const checkInTime = new Date(existing.checkIn);
     const hoursWorked = ((now - checkInTime) / 3600000).toFixed(2);
+
+    // Early-leave detection (left BEFORE shift end)
+    const emp = await db.collection('employees').findOne({ id: employeeId });
+    const settings = await db.collection('settings').findOne({ id: 'system' });
+    const empSettings = settings?.employees || {};
+    const shiftEndStr = emp?.shiftEnd || empSettings.workEnd || '17:00';
+    const shiftEndMinutes = shiftToMinutes(shiftEndStr);
+    const earlyLeaveMinutes = Math.max(0, shiftEndMinutes - localMinutes);
+
     await db.collection('attendance').updateOne(
       { id: existing.id },
-      { $set: { checkOut: now.toISOString(), checkOutPhoto: photoUrl, checkOutLat: lat || null, checkOutLng: lng || null, hoursWorked: Number(hoursWorked) } }
+      { $set: {
+        checkOut: now.toISOString(),
+        checkOutLocal: localHM,
+        checkOutLocalTime: `${today} ${localHM}`,
+        checkOutPhoto: photoUrl,
+        checkOutLat: lat || null,
+        checkOutLng: lng || null,
+        hoursWorked: Number(hoursWorked),
+        shiftEnd: shiftEndStr,
+        earlyLeaveMinutes,
+        isEarlyLeave: earlyLeaveMinutes > 0,
+      }}
     );
-    const emp = await db.collection('employees').findOne({ id: employeeId });
-    await logActivity(db, { action: 'attendance_checkout', entity: 'attendance', entityId: existing.id, user: emp?.name, userId: employeeId, details: `انصراف بعد ${hoursWorked} ساعة`, ip: clientIp });
-    const timeStr = now.toLocaleTimeString('ar-IQ', { hour: '2-digit', minute: '2-digit' });
+    await logActivity(db, { action: 'attendance_checkout', entity: 'attendance', entityId: existing.id, user: emp?.name, userId: employeeId, details: `انصراف في ${localHM} (بغداد) - عمل ${hoursWorked} ساعة${earlyLeaveMinutes > 0 ? ` - انصراف مبكر ${earlyLeaveMinutes}د` : ''}`, ip: clientIp });
     await notifyManager(db, {
       type: 'attendance_checkout',
       title: `🚪 انصراف: ${emp?.name}`,
-      message: `بصم الانصراف في ${timeStr}\nالساعات المُنجزة: ${hoursWorked}`,
+      message: `بصم الانصراف في ${localHM} (بغداد)\nالساعات المُنجزة: ${hoursWorked}${earlyLeaveMinutes > 0 ? `\n⚠️ انصراف مبكر بـ ${earlyLeaveMinutes} دقيقة` : ''}`,
       employeeId,
     });
-    // Real-time event
     await db.collection('events').insertOne({
       id: uuidv4(), type: 'attendance_checkout',
       employeeId, employeeName: emp?.name, hoursWorked: Number(hoursWorked),
+      checkOutLocal: localHM, earlyLeaveMinutes,
       ts: now.toISOString(),
     });
-    return ok({ success: true, hoursWorked: Number(hoursWorked) });
+    return ok({ success: true, hoursWorked: Number(hoursWorked), checkOutLocal: localHM, earlyLeaveMinutes });
   }
 
   // Today's attendance for all
   if (path === 'attendance/today' && method === 'GET') {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = getLocalDateString();  // 🌍 Baghdad date
     const records = await db.collection('attendance').find({ date: today }).toArray();
     return ok(records.map(r => { delete r._id; return r; }));
+  }
+
+  // 🕐 Server time in Baghdad — used by frontend to show authoritative time
+  if (path === 'server-time' && method === 'GET') {
+    const now = new Date();
+    return ok({
+      iso: now.toISOString(),                      // UTC ISO
+      timezone: APP_TZ,                            // 'Asia/Baghdad'
+      localDate: getLocalDateString(now),          // 'YYYY-MM-DD' in Baghdad
+      localTime: getLocalHM(now),                  // 'HH:MM' in Baghdad
+      localFull: `${getLocalDateString(now)} ${getLocalHM(now)}`,
+      epoch: now.getTime(),
+    });
   }
 
   // Employee's attendance/tasks

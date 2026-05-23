@@ -964,6 +964,53 @@ function CameraModal({ open, mode, onClose, onCapture }) {
 function AttendanceBanner({ employee, todayAtt, onRefresh }) {
   const [cameraOpen, setCameraOpen] = useState(false);
   const [cameraMode, setCameraMode] = useState('in');
+  const [serverTime, setServerTime] = useState(null);
+
+  // 🕐 Fetch authoritative Baghdad time from server every 30s
+  useEffect(() => {
+    let alive = true;
+    const fetchTime = async () => {
+      try {
+        const r = await api('server-time');
+        if (alive && r?.localTime) setServerTime(r);
+      } catch {}
+    };
+    fetchTime();
+    const interval = setInterval(fetchTime, 30000);
+    return () => { alive = false; clearInterval(interval); };
+  }, []);
+
+  // Local ticking clock that increments every second using server offset
+  const [tickTime, setTickTime] = useState('--:--');
+  useEffect(() => {
+    if (!serverTime) return;
+    const offset = serverTime.epoch - Date.now(); // server vs client clock skew
+    const update = () => {
+      const adjusted = new Date(Date.now() + offset);
+      // Convert to Baghdad HH:MM:SS
+      const fmt = new Intl.DateTimeFormat('en-CA', {
+        timeZone: serverTime.timezone || 'Asia/Baghdad',
+        hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+      });
+      const parts = {}; for (const p of fmt.formatToParts(adjusted)) if (p.type !== 'literal') parts[p.type] = p.value;
+      setTickTime(`${parts.hour}:${parts.minute}:${parts.second}`);
+    };
+    update();
+    const i = setInterval(update, 1000);
+    return () => clearInterval(i);
+  }, [serverTime]);
+
+  // Compute time-until-shift-start (or how late they are)
+  const shiftInfo = (() => {
+    if (!employee?.shiftStart || !serverTime) return null;
+    const [sh, sm] = String(employee.shiftStart).split(':').map(Number);
+    const shiftMin = sh * 60 + sm;
+    const [nh, nm] = tickTime.split(':').map(Number);
+    if (isNaN(nh)) return null;
+    const nowMin = nh * 60 + nm;
+    const diff = nowMin - shiftMin;
+    return { shiftStart: employee.shiftStart, diff };
+  })();
 
   const handleCapture = async (photoUrl, lat, lng) => {
     setCameraOpen(false);
@@ -978,8 +1025,43 @@ function AttendanceBanner({ employee, todayAtt, onRefresh }) {
     }
   };
 
+  // Format check-in time: prefer stored Baghdad time, fallback to UTC conversion
+  const formatCheckTime = (rec, kind = 'in') => {
+    if (kind === 'in' && rec?.checkInLocal) return rec.checkInLocal;
+    if (kind === 'out' && rec?.checkOutLocal) return rec.checkOutLocal;
+    const iso = kind === 'in' ? rec?.checkIn : rec?.checkOut;
+    if (!iso) return '--:--';
+    try {
+      return new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'Asia/Baghdad', hour: '2-digit', minute: '2-digit', hour12: false,
+      }).format(new Date(iso));
+    } catch { return '--:--'; }
+  };
+
   return (
     <>
+      {/* 🕐 Baghdad time clock — always visible */}
+      <div className="bg-zinc-900/80 border-b border-cyan-500/30 px-4 py-2 flex items-center justify-center gap-4 flex-wrap text-xs">
+        <div className="flex items-center gap-2">
+          <span className="text-cyan-400">🕐 وقت بغداد:</span>
+          <span className="font-mono font-bold text-cyan-300 text-base">{tickTime}</span>
+        </div>
+        {employee?.shiftStart && (
+          <div className="text-muted-foreground">
+            <span>بدء الدوام:</span> <span className="font-mono font-bold text-amber-300">{employee.shiftStart}</span>
+            {shiftInfo && shiftInfo.diff < 0 && !todayAtt && (
+              <span className="mr-2 text-emerald-400">• متبقي {Math.abs(shiftInfo.diff)} دقيقة</span>
+            )}
+            {shiftInfo && shiftInfo.diff > 10 && !todayAtt && (
+              <span className="mr-2 text-red-400 font-bold animate-pulse">⚠️ متأخر {shiftInfo.diff} دقيقة</span>
+            )}
+            {shiftInfo && shiftInfo.diff >= 0 && shiftInfo.diff <= 10 && !todayAtt && (
+              <span className="mr-2 text-amber-400">• ضمن فترة السماح</span>
+            )}
+          </div>
+        )}
+      </div>
+
       {!todayAtt ? (
         <div className="bg-amber-500/10 border-y border-amber-500/30 px-4 py-3 flex items-center justify-between flex-wrap gap-2">
           <p className="text-sm text-amber-400 flex items-center gap-2"><AlertCircle className="w-4 h-4" /> يجب تسجيل الحضور بصورة قبل البدء بالعمل</p>
@@ -989,14 +1071,20 @@ function AttendanceBanner({ employee, todayAtt, onRefresh }) {
         </div>
       ) : !todayAtt.checkOut ? (
         <div className="bg-emerald-500/10 border-y border-emerald-500/30 px-4 py-3 flex items-center justify-between flex-wrap gap-2">
-          <p className="text-sm text-emerald-400 flex items-center gap-2"><CheckCircle2 className="w-4 h-4" /> أنت حالياً في الدوام - بدأت في {new Date(todayAtt.checkIn).toLocaleTimeString('ar-IQ', { hour: '2-digit', minute: '2-digit' })}</p>
+          <p className="text-sm text-emerald-400 flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4" />
+            أنت حالياً في الدوام - بدأت في <span className="font-mono font-bold mx-1">{formatCheckTime(todayAtt, 'in')}</span> (بغداد)
+            {todayAtt.isLate && (
+              <span className="text-red-400 font-bold">• تأخير {todayAtt.lateMinutes}د</span>
+            )}
+          </p>
           <Button onClick={() => { setCameraMode('out'); setCameraOpen(true); }} className="btn-neon">
             <Camera className="w-4 h-4 ml-1" /> بصمة انصراف بالصورة
           </Button>
         </div>
       ) : (
         <div className="bg-purple-500/10 border-y border-purple-500/30 px-4 py-3 text-center text-sm text-purple-400">
-          ✅ تم إنهاء الدوام اليومي - شكراً لك!
+          ✅ تم إنهاء الدوام اليومي - شكراً لك! (انصرفت في <span className="font-mono font-bold">{formatCheckTime(todayAtt, 'out')}</span>)
         </div>
       )}
       <CameraModal open={cameraOpen} mode={cameraMode} onClose={() => setCameraOpen(false)} onCapture={handleCapture} />
