@@ -315,6 +315,16 @@ async function getDb() {
 }
 
 async function seedDefaults(db) {
+  // 🛡️ ONE-TIME SEED GUARD: Once seeded, NEVER re-seed (even if user deletes everything)
+  // This prevents the "deleted items come back" bug on Vercel cold starts.
+  try {
+    const seedFlag = await db.collection('_system').findOne({ _id: 'seed_status' });
+    if (seedFlag?.seeded) {
+      // Already seeded before — only run safe backfills (existing-doc updates), never inserts
+      return seedBackfillOnly(db);
+    }
+  } catch {}
+
   const productsCount = await db.collection('products').countDocuments();
   if (productsCount === 0) {
     await db.collection('products').insertMany([
@@ -558,6 +568,77 @@ async function seedDefaults(db) {
       const c = await db.collection('subscribers').countDocuments({ networkId: n.id });
       await db.collection('networks').updateOne({ id: n.id }, { $set: { subscribers: c } });
     }
+  }
+
+  // ✅ MARK AS SEEDED — never re-seed even if user deletes all data
+  // This is the FIX for "deleted items come back" bug on Vercel cold starts.
+  try {
+    await db.collection('_system').updateOne(
+      { _id: 'seed_status' },
+      { $set: { seeded: true, seededAt: new Date().toISOString() } },
+      { upsert: true }
+    );
+    console.log('[seed] ✅ Initial seed complete — marked as seeded');
+  } catch (e) {
+    console.warn('[seed] Failed to set flag:', e?.message);
+  }
+}
+
+// 🔄 Safe backfill (runs every cold start, but never inserts new demo data)
+// Only updates EXISTING documents that are missing required fields.
+async function seedBackfillOnly(db) {
+  try {
+    // 1) Ensure employees have required fields (username, password, permissions, photo, shifts)
+    const allEmps = await db.collection('employees').find({}).toArray();
+    let i = 1;
+    for (const e of allEmps) {
+      const updates = {};
+      if (!e.employeeId) updates.employeeId = `EMP-${String(i).padStart(3, '0')}`;
+      if (!e.username) updates.username = (e.name || 'emp').toLowerCase().replace(/[^a-z]/g, '').slice(0, 8) || `emp${i}`;
+      if (!e.password) updates.password = 'pass123';
+      if (!e.photo) updates.photo = '👤';
+      if (!e.shiftStart) updates.shiftStart = '08:00';
+      if (!e.shiftEnd) updates.shiftEnd = '17:00';
+      if (!e.permissions) updates.permissions = ['tasks'];
+      if (!e.status) updates.status = 'active';
+      if (Object.keys(updates).length > 0) await db.collection('employees').updateOne({ id: e.id }, { $set: updates });
+      i++;
+    }
+
+    // 2) Ensure subscribers have zoneNumber & fatNumber (no new inserts!)
+    const allSubs = await db.collection('subscribers').find({}).toArray();
+    const allZones = await db.collection('zones').find({}).toArray();
+    const zoneById = Object.fromEntries(allZones.map(z => [z.id, z]));
+    let j = 0;
+    for (const s of allSubs) {
+      const updates = {};
+      if (!s.zoneNumber && s.zoneId && zoneById[s.zoneId]) {
+        updates.zoneNumber = zoneById[s.zoneId].number || `Z-${String((j % 4) + 1).padStart(3, '0')}`;
+      }
+      if (!s.fatNumber) {
+        updates.fatNumber = `F-${String((j % 4) + 1).padStart(2, '0')}-${String((j % 4) + 1).padStart(2, '0')}`;
+      }
+      if (Object.keys(updates).length > 0) {
+        await db.collection('subscribers').updateOne({ id: s.id }, { $set: updates });
+      }
+      j++;
+    }
+
+    // 3) Refresh zone subscriber counts (no inserts)
+    const allZones2 = await db.collection('zones').find({}).toArray();
+    for (const z of allZones2) {
+      const count = await db.collection('subscribers').countDocuments({ zoneId: z.id });
+      await db.collection('zones').updateOne({ id: z.id }, { $set: { subscribers: count } });
+    }
+
+    // 4) Refresh network subscriber counts (no inserts)
+    const allNets = await db.collection('networks').find({}).toArray();
+    for (const n of allNets) {
+      const c = await db.collection('subscribers').countDocuments({ networkId: n.id });
+      await db.collection('networks').updateOne({ id: n.id }, { $set: { subscribers: c } });
+    }
+  } catch (e) {
+    console.warn('[backfill] error:', e?.message);
   }
 }
 
