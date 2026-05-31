@@ -35,7 +35,7 @@ function HeaderUserWidget() {
 
   return (
     <>
-      <div className="fixed top-3 left-3 z-[80]" data-user-widget>
+      <div className="fixed top-3 right-3 z-[80]" data-user-widget>
         <button
           onClick={() => setOpen(!open)}
           className="flex items-center gap-2 bg-black/60 backdrop-blur-md border border-[#d4af37]/30 hover:border-[#d4af37]/60 rounded-full px-3 py-1.5 shadow-lg transition group"
