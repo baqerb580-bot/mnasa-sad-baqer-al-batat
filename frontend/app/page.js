@@ -396,6 +396,99 @@ function Sidebar({ active, setActive, open, setOpen }) {
   );
 }
 
+// ============ GLOBAL QUICK SEARCH ============
+function GlobalQuickSearch({ setActive }) {
+  const [q, setQ] = useState('');
+  const [open, setOpen] = useState(false);
+  const [focusedIdx, setFocusedIdx] = useState(0);
+  const wrapRef = useRef(null);
+
+  useEffect(() => {
+    const onClick = (e) => { if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false); };
+    document.addEventListener('mousedown', onClick);
+    return () => document.removeEventListener('mousedown', onClick);
+  }, []);
+
+  // Build flat searchable list from MENU (groups + children + items)
+  const items = (() => {
+    const list = [];
+    for (const m of MENU) {
+      if (m.group && Array.isArray(m.children)) {
+        for (const c of m.children) list.push({ id: c.id, label: c.label, parent: m.label, icon: c.icon || m.icon });
+      } else {
+        list.push({ id: m.id, label: m.label, icon: m.icon });
+      }
+    }
+    return list;
+  })();
+
+  const norm = (s) => (s || '').toString().toLowerCase().trim();
+  const query = norm(q);
+  const results = query
+    ? items.filter(it => norm(it.label).includes(query) || norm(it.parent).includes(query) || norm(it.id).includes(query)).slice(0, 8)
+    : [];
+
+  const select = (it) => {
+    if (!it) return;
+    setActive(it.id);
+    setQ('');
+    setOpen(false);
+  };
+
+  const onKey = (e) => {
+    if (!results.length) return;
+    if (e.key === 'ArrowDown') { e.preventDefault(); setFocusedIdx((i) => (i + 1) % results.length); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); setFocusedIdx((i) => (i - 1 + results.length) % results.length); }
+    else if (e.key === 'Enter') { e.preventDefault(); select(results[focusedIdx]); }
+    else if (e.key === 'Escape') { setOpen(false); }
+  };
+
+  return (
+    <div ref={wrapRef} className="relative hidden md:block" data-testid="global-quick-search">
+      <div className="flex items-center gap-2 px-4 py-2 glass-card rounded-xl">
+        <Search className="w-4 h-4 text-muted-foreground" />
+        <Input
+          value={q}
+          onChange={(e) => { setQ(e.target.value); setOpen(true); setFocusedIdx(0); }}
+          onFocus={() => setOpen(true)}
+          onKeyDown={onKey}
+          placeholder="بحث سريع... (اسم القسم)"
+          className="border-0 bg-transparent w-48 focus-visible:ring-0 h-6 p-0"
+          data-testid="global-quick-search-input"
+        />
+      </div>
+      {open && query && (
+        <div className="absolute top-full mt-2 right-0 w-72 glass-strong border border-gold-soft rounded-xl shadow-2xl overflow-hidden z-[70]" data-testid="global-quick-search-results">
+          {results.length === 0 ? (
+            <div className="p-3 text-xs text-muted-foreground text-center">لا توجد نتائج</div>
+          ) : (
+            <div className="max-h-72 overflow-auto py-1">
+              {results.map((it, idx) => {
+                const Icon = it.icon || Search;
+                return (
+                  <button
+                    key={it.id}
+                    onMouseEnter={() => setFocusedIdx(idx)}
+                    onClick={() => select(it)}
+                    className={`w-full text-right px-3 py-2 flex items-center gap-2 text-sm transition ${idx === focusedIdx ? 'bg-gold/10 text-gold' : 'hover:bg-gold/5 text-foreground'}`}
+                    data-testid={`global-quick-search-item-${it.id}`}
+                  >
+                    <Icon className="w-4 h-4 text-gold/80" />
+                    <div className="flex-1 min-w-0">
+                      <div className="truncate">{it.label}</div>
+                      {it.parent && <div className="text-[10px] text-muted-foreground truncate">{it.parent}</div>}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ============ TOP BAR ============
 function TopBar({ setActive, sidebarOpen, setSidebarOpen }) {
   const [time, setTime] = useState('');
@@ -405,13 +498,13 @@ function TopBar({ setActive, sidebarOpen, setSidebarOpen }) {
   }, []);
 
   return (
-    <header className="glass-strong border-b border-gold-soft px-6 py-4 flex items-center justify-between gap-4">
-      <div className="flex items-center gap-3">
-        <Button variant="ghost" size="icon" onClick={() => setSidebarOpen(!sidebarOpen)} className="hover:bg-gold/10">
+    <header className="glass-strong border-b border-gold-soft pr-6 pl-14 md:pl-56 py-4 flex items-center justify-between gap-4">
+      <div className="flex items-center gap-3 min-w-0">
+        <Button variant="ghost" size="icon" onClick={() => setSidebarOpen(!sidebarOpen)} className="hover:bg-gold/10 flex-shrink-0" data-testid="sidebar-toggle-btn">
           <Menu className="w-5 h-5 text-gold" />
         </Button>
-        <div>
-          <h2 className="text-lg font-bold gold-text">منصة إدارة الأعمال الذكية</h2>
+        <div className="min-w-0">
+          <h2 className="text-lg font-bold gold-text truncate">منصة إدارة الأعمال الذكية</h2>
           <p className="text-xs text-muted-foreground flex items-center gap-2">
             <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
             النظام يعمل · {time}
@@ -419,12 +512,9 @@ function TopBar({ setActive, sidebarOpen, setSidebarOpen }) {
         </div>
       </div>
 
-      <div className="flex items-center gap-2">
-        <div className="hidden md:flex items-center gap-2 px-4 py-2 glass-card rounded-xl">
-          <Search className="w-4 h-4 text-muted-foreground" />
-          <Input placeholder="بحث سريع..." className="border-0 bg-transparent w-48 focus-visible:ring-0" />
-        </div>
-        <Button variant="ghost" size="icon" className="relative hover:bg-gold/10" onClick={() => setActive('ai')}>
+      <div className="flex items-center gap-2 flex-shrink-0">
+        <GlobalQuickSearch setActive={setActive} />
+        <Button variant="ghost" size="icon" className="relative hover:bg-gold/10" onClick={() => setActive('ai')} data-testid="topbar-ai-btn">
           <Sparkles className="w-5 h-5 text-gold" />
         </Button>
         <ThemeToggle />

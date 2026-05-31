@@ -22,6 +22,7 @@ export function BarcodeScanner({ open, onClose, onDetected, continuous = false, 
   const [error, setError] = useState(null);
   const [torchOn, setTorchOn] = useState(false);
   const scannerRef = useRef(null);
+  const lastScanRef = useRef(null);
   const elementId = 'barcode-scanner-region';
 
   // Load cameras on open
@@ -56,31 +57,90 @@ export function BarcodeScanner({ open, onClose, onDetected, continuous = false, 
 
     (async () => {
       try {
-        const { Html5Qrcode } = await import('html5-qrcode');
-        html5Qrcode = new Html5Qrcode(elementId, /* verbose */ false);
+        const { Html5Qrcode, Html5QrcodeSupportedFormats } = await import('html5-qrcode');
+        // Limit formats to common barcodes for faster scanning
+        const formatsToSupport = [
+          Html5QrcodeSupportedFormats.EAN_13,
+          Html5QrcodeSupportedFormats.EAN_8,
+          Html5QrcodeSupportedFormats.UPC_A,
+          Html5QrcodeSupportedFormats.UPC_E,
+          Html5QrcodeSupportedFormats.CODE_128,
+          Html5QrcodeSupportedFormats.CODE_39,
+          Html5QrcodeSupportedFormats.CODE_93,
+          Html5QrcodeSupportedFormats.ITF,
+          Html5QrcodeSupportedFormats.CODABAR,
+          Html5QrcodeSupportedFormats.QR_CODE,
+          Html5QrcodeSupportedFormats.DATA_MATRIX,
+        ];
+        html5Qrcode = new Html5Qrcode(elementId, {
+          verbose: false,
+          formatsToSupport,
+          useBarCodeDetectorIfSupported: true,
+          experimentalFeatures: { useBarCodeDetectorIfSupported: true },
+        });
         scannerRef.current = html5Qrcode;
         setScanning(true);
         setError(null);
+        // Use high-res back camera with continuous autofocus for sharper images
+        const cameraConfig = (typeof currentCameraId === 'string' && currentCameraId)
+          ? { deviceId: { exact: currentCameraId } }
+          : { facingMode: { ideal: 'environment' } };
         await html5Qrcode.start(
-          currentCameraId,
+          cameraConfig,
           {
-            fps: 10,
-            qrbox: { width: 280, height: 180 },
-            aspectRatio: 1.6,
+            fps: 30,
+            qrbox: (w, h) => {
+              const minEdge = Math.min(w, h);
+              const size = Math.floor(minEdge * 0.8);
+              return { width: size, height: Math.floor(size * 0.55) };
+            },
+            aspectRatio: window.innerWidth < 640 ? 1.3333334 : 1.7777778,
             disableFlip: false,
+            videoConstraints: {
+              deviceId: typeof currentCameraId === 'string' ? { exact: currentCameraId } : undefined,
+              facingMode: { ideal: 'environment' },
+              width: { ideal: 1920 },
+              height: { ideal: 1080 },
+              advanced: [
+                { focusMode: 'continuous' },
+                { focusMode: 'auto' },
+                { exposureMode: 'continuous' },
+                { whiteBalanceMode: 'continuous' },
+              ],
+            },
           },
           (decodedText, decodedResult) => {
-            // success callback
-            setLastScan({ text: decodedText, format: decodedResult?.result?.format?.formatName, ts: Date.now() });
-            try { navigator.vibrate?.(120); } catch {}
+            // success callback - instant capture
+            const now = Date.now();
+            // Debounce duplicate scans within 800ms
+            if (lastScanRef.current && lastScanRef.current.text === decodedText && (now - lastScanRef.current.ts) < 800) {
+              return;
+            }
+            const scan = { text: decodedText, format: decodedResult?.result?.format?.formatName, ts: now };
+            lastScanRef.current = scan;
+            setLastScan(scan);
+            try { navigator.vibrate?.(80); } catch {}
             try { onDetected?.(decodedText, decodedResult); } catch {}
             if (!continuous) {
-              try { html5Qrcode.stop(); } catch {}
+              try { html5Qrcode.stop().catch(() => {}); } catch {}
               setScanning(false);
             }
           },
           () => {} // error callback (fired every frame, ignore)
         );
+        // After start, try to apply continuous autofocus on the video track explicitly
+        try {
+          const vid = document.querySelector(`#${elementId} video`);
+          const track = vid?.srcObject?.getVideoTracks?.()?.[0];
+          if (track && 'applyConstraints' in track) {
+            const caps = track.getCapabilities ? track.getCapabilities() : {};
+            const advanced = [];
+            if (caps.focusMode && caps.focusMode.includes('continuous')) advanced.push({ focusMode: 'continuous' });
+            if (caps.exposureMode && caps.exposureMode.includes('continuous')) advanced.push({ exposureMode: 'continuous' });
+            if (caps.whiteBalanceMode && caps.whiteBalanceMode.includes('continuous')) advanced.push({ whiteBalanceMode: 'continuous' });
+            if (advanced.length) await track.applyConstraints({ advanced }).catch(() => {});
+          }
+        } catch {}
       } catch (e) {
         if (!cancelled) setError('تعذّر تشغيل الكاميرا: ' + (e?.message || 'حاول إعادة المحاولة'));
         setScanning(false);

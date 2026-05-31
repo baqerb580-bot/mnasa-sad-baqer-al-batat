@@ -42,9 +42,10 @@ export default function Products() {
   const [searchQuery, setSearchQuery] = useState({ q: '', device: '', origin: '', type: '', brand: '', inStock: false });
   const [allDevices, setAllDevices] = useState([]);
   const [scannerOpen, setScannerOpen] = useState(false);
+  const [textQuery, setTextQuery] = useState('');
 
   const blankForm = {
-    name: '', sku: '', barcode: '', category: 'accessories', price: 0, cost: 0, stock: 0, lowStockAlert: 5, image: '📦',
+    name: '', sku: '', barcode: '', barcodes: [], category: 'accessories', price: 0, cost: 0, stock: 0, lowStockAlert: 5, image: '📦',
     // Pro fields (smart compatibility)
     productType: 'general', // screen | cover | sticker | battery | cable | charger | accessory | spare | general
     origin: 'commercial', // original | oem | commercial | used
@@ -55,6 +56,8 @@ export default function Products() {
   };
   const [form, setForm] = useState(blankForm);
   const [newDevice, setNewDevice] = useState('');
+  const [newBarcode, setNewBarcode] = useState('');
+  const [extraBarcodeScannerOpen, setExtraBarcodeScannerOpen] = useState(false);
 
   const load = () => api('products').then(setArr(setItems));
   useEffect(() => {
@@ -62,12 +65,30 @@ export default function Products() {
     api('products/devices').then(d => setAllDevices(safeArr(d)));
   }, []);
 
-  const filtered = filter === 'all' ? items : items.filter(i => i.category === filter);
+  const filtered = (() => {
+    const base = filter === 'all' ? items : items.filter(i => i.category === filter);
+    const q = (textQuery || '').trim().toLowerCase();
+    if (!q) return base;
+    const norm = (v) => String(v || '').toLowerCase();
+    return base.filter(p => {
+      const barcodesArr = Array.isArray(p.barcodes) ? p.barcodes : [];
+      return norm(p.name).includes(q)
+        || norm(p.sku).includes(q)
+        || norm(p.barcode).includes(q)
+        || barcodesArr.some(b => norm(b).includes(q))
+        || norm(p.brand).includes(q)
+        || norm(p.model).includes(q);
+    });
+  })();
 
   const save = async () => {
     if (!form.name) { toast.error('الاسم مطلوب'); return; }
+    const extra = Array.isArray(form.barcodes) ? form.barcodes.filter(Boolean) : [];
+    // Merge primary barcode + extras into a unique list
+    const allBarcodes = Array.from(new Set([form.barcode, ...extra].filter(Boolean).map(b => String(b).trim())));
     const payload = {
       ...form,
+      barcodes: allBarcodes.filter(b => b !== String(form.barcode || '').trim()),
       price: Number(form.price), cost: Number(form.cost),
       stock: Number(form.stock), lowStockAlert: Number(form.lowStockAlert),
       compatibleDevices: Array.isArray(form.compatibleDevices) ? form.compatibleDevices : [],
@@ -90,10 +111,20 @@ export default function Products() {
   };
   const startEdit = (p) => {
     setEditing(p);
-    setForm({ ...blankForm, ...p, compatibleDevices: p.compatibleDevices || [] });
+    setForm({ ...blankForm, ...p, compatibleDevices: p.compatibleDevices || [], barcodes: Array.isArray(p.barcodes) ? p.barcodes : [] });
     setDialogTab('basic'); setOpen(true);
   };
   const startNew = () => { setEditing(null); setForm(blankForm); setDialogTab('basic'); setOpen(true); };
+
+  const addExtraBarcode = (code) => {
+    const c = String(code || newBarcode || '').trim();
+    if (!c) return;
+    const all = [form.barcode, ...(form.barcodes || [])].filter(Boolean).map(x => String(x).trim());
+    if (all.includes(c)) { toast.info('الباركود موجود'); return; }
+    setForm({ ...form, barcodes: [...(form.barcodes || []), c] });
+    setNewBarcode('');
+  };
+  const removeExtraBarcode = (code) => setForm({ ...form, barcodes: (form.barcodes || []).filter(c => c !== code) });
 
   const addDevice = () => {
     const d = newDevice.trim();
@@ -209,7 +240,17 @@ export default function Products() {
       <div className="flex items-center justify-between flex-wrap gap-3">
         <h1 className="text-2xl font-bold gold-text">المنتجات والمخزون</h1>
         <div className="flex gap-2 flex-wrap">
-          <Button variant="outline" onClick={() => setScannerOpen(true)} className="border-emerald-500/40 hover:bg-emerald-500/10 text-emerald-400">
+          <div className="relative flex-1 min-w-[220px]">
+            <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+            <Input
+              value={textQuery}
+              onChange={(e) => setTextQuery(e.target.value)}
+              placeholder="بحث بالاسم أو الباركود..."
+              className="bg-input/30 border-gold/20 pr-9"
+              data-testid="products-text-search-input"
+            />
+          </div>
+          <Button variant="outline" onClick={() => setScannerOpen(true)} className="border-emerald-500/40 hover:bg-emerald-500/10 text-emerald-400" data-testid="products-open-scanner-btn">
             <Camera className="w-4 h-4 ml-1" /> 📷 مسح باركود
           </Button>
           <Button variant="outline" onClick={() => setSearchOpen(true)} className="border-cyan-500/40 hover:bg-cyan-500/10 text-cyan-400">
@@ -338,7 +379,37 @@ export default function Products() {
               <div className="grid grid-cols-2 gap-3">
                 <div className="col-span-2"><Label>اسم المنتج</Label><Input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} className="bg-input/30 border-gold/20" /></div>
                 <div><Label>SKU</Label><Input value={form.sku} onChange={e => setForm({ ...form, sku: e.target.value })} className="bg-input/30 border-gold/20 font-mono text-xs" /></div>
-                <div><Label>الباركود</Label><Input value={form.barcode} onChange={e => setForm({ ...form, barcode: e.target.value })} className="bg-input/30 border-gold/20 font-mono text-xs" /></div>
+                <div><Label>الباركود الرئيسي</Label><Input value={form.barcode} onChange={e => setForm({ ...form, barcode: e.target.value })} className="bg-input/30 border-gold/20 font-mono text-xs" data-testid="product-primary-barcode-input" /></div>
+                <div className="col-span-2 p-3 rounded-lg bg-purple-500/5 border border-purple-500/30 space-y-2">
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <p className="font-bold text-purple-400 text-xs flex items-center gap-2"><QrCode className="w-4 h-4" /> باركودات إضافية (ثانوية)</p>
+                    <span className="text-[10px] text-purple-300/70">{(form.barcodes || []).length} باركود</span>
+                  </div>
+                  <p className="text-[10px] text-purple-300/70">يمكنك إضافة عدة باركودات لنفس المنتج (مثل عبوة وحدة وعبوة جملة). يتم البحث بأي منها.</p>
+                  <div className="flex gap-2">
+                    <Input
+                      value={newBarcode}
+                      onChange={e => setNewBarcode(e.target.value)}
+                      onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), addExtraBarcode())}
+                      placeholder="أدخل باركود إضافي..."
+                      className="bg-input/30 border-purple-500/30 flex-1 font-mono text-xs"
+                      data-testid="product-extra-barcode-input"
+                    />
+                    <Button type="button" onClick={() => addExtraBarcode()} className="bg-purple-500/15 text-purple-400 border border-purple-500/40 hover:bg-purple-500/30" data-testid="product-add-extra-barcode-btn">+ إضافة</Button>
+                    <Button type="button" onClick={() => setExtraBarcodeScannerOpen(true)} className="bg-emerald-500/15 text-emerald-400 border border-emerald-500/40 hover:bg-emerald-500/30" data-testid="product-scan-extra-barcode-btn">
+                      <Camera className="w-4 h-4" />
+                    </Button>
+                  </div>
+                  <div className="flex flex-wrap gap-2 mt-2">
+                    {(form.barcodes || []).length === 0 ? (
+                      <p className="text-[10px] text-muted-foreground italic">لا توجد باركودات إضافية.</p>
+                    ) : (form.barcodes || []).map(b => (
+                      <Badge key={b} className="bg-purple-500/15 text-purple-400 border-purple-500/30 cursor-pointer hover:bg-red-500/15 hover:text-red-400 hover:border-red-500/30 font-mono" onClick={() => removeExtraBarcode(b)} data-testid={`product-extra-barcode-chip-${b}`}>
+                        {b} <span className="mr-1 opacity-70">×</span>
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
                 <div>
                   <Label>الفئة</Label>
                   <Select value={form.category} onValueChange={v => setForm({ ...form, category: v })}>
@@ -455,6 +526,14 @@ export default function Products() {
         onClose={() => setScannerOpen(false)}
         onDetected={handleBarcodeDetected}
         title="📷 مسح باركود المنتج"
+      />
+
+      {/* Scanner for adding a secondary barcode to an existing product form */}
+      <BarcodeScanner
+        open={extraBarcodeScannerOpen}
+        onClose={() => setExtraBarcodeScannerOpen(false)}
+        onDetected={(code) => { setExtraBarcodeScannerOpen(false); addExtraBarcode(code); toast.success(`📷 تم إضافة: ${code}`); }}
+        title="📷 مسح باركود إضافي"
       />
     </div>
   );

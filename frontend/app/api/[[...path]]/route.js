@@ -5912,8 +5912,11 @@ async function handle(request, params) {
   }
 
   if (path.startsWith('products/barcode/') && method === 'GET') {
-    const barcode = path.split('/')[2];
-    const product = await db.collection('products').findOne({ barcode });
+    const barcode = decodeURIComponent(path.split('/')[2] || '');
+    // Match against primary `barcode` OR any value inside `barcodes[]` array
+    const product = await db.collection('products').findOne({
+      $or: [{ barcode }, { barcodes: barcode }]
+    });
     if (!product) return err('المنتج غير موجود', 404);
     delete product._id;
     return ok(product);
@@ -5978,8 +5981,10 @@ async function handle(request, params) {
 
     const matchesText = (p) => {
       if (!q) return true;
+      const barcodesArr = Array.isArray(p.barcodes) ? p.barcodes : [];
       return includesText(p.name) || includesText(p.sku) || includesText(p.barcode) ||
              includesText(p.brand) || includesText(p.model) || includesText(p.color) ||
+             barcodesArr.some(b => includesText(b)) ||
              (p.compatibleDevices || []).some(d => includesText(d));
     };
 
