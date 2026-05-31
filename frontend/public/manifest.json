@@ -1,0 +1,62 @@
+{
+  "name": "مركز الغزلان ERP",
+  "short_name": "الغزلان",
+  "description": "منصة ERP + NOC + POS + AI متكاملة لإدارة شركات الإنترنت والمبيعات والصيانة",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone", "fullscreen", "minimal-ui"],
+  "orientation": "any",
+  "background_color": "#0f0f19",
+  "theme_color": "#d4af37",
+  "lang": "ar",
+  "dir": "rtl",
+  "categories": ["business", "productivity", "finance"],
+  "prefer_related_applications": false,
+  "icons": [
+    { "src": "/icons/icon-72.png", "sizes": "72x72", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-96.png", "sizes": "96x96", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-128.png", "sizes": "128x128", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-144.png", "sizes": "144x144", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-152.png", "sizes": "152x152", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-167.png", "sizes": "167x167", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-180.png", "sizes": "180x180", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-256.png", "sizes": "256x256", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-384.png", "sizes": "384x384", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    {
+      "name": "نقطة البيع",
+      "short_name": "POS",
+      "description": "افتح نقطة البيع مباشرة",
+      "url": "/?section=pos",
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "المتجر الإلكتروني",
+      "short_name": "المتجر",
+      "description": "افتح المتجر",
+      "url": "/store",
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "لوحة الموظف",
+      "short_name": "الموظف",
+      "description": "ادخل إلى لوحة الموظف",
+      "url": "/employee",
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "form_factor": "wide",
+      "label": "الواجهة الرئيسية"
+    }
+  ]
+}

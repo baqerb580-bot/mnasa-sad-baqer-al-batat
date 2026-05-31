@@ -1,0 +1,27 @@
+services:
+  - type: web
+    name: ghazlan-whatsapp
+    env: node
+    rootDir: whatsapp-service
+    buildCommand: yarn install
+    startCommand: node index.js
+    plan: starter
+    region: frankfurt
+    healthCheckPath: /health
+    disk:
+      name: wa-auth
+      mountPath: /opt/render/project/src/whatsapp-service/auth
+      sizeGB: 1
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: WHATSAPP_SESSION_PATH
+        value: /opt/render/project/src/whatsapp-service/auth
+      - key: WHATSAPP_SERVICE_TOKEN
+        generateValue: true
+      - key: PUPPETEER_EXECUTABLE_PATH
+        value: /usr/bin/google-chrome
+      - key: WEBHOOK_URL
+        sync: false        # set to your main app: https://your-app.vercel.app/api/whatsapp/webhook

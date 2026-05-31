@@ -1,0 +1,28 @@
+# ============================================================
+# Netlify configuration — مركز الغزلان ERP
+# ============================================================
+
+[build]
+  command = "npm run build"
+  publish = ".next"
+
+[build.environment]
+  NODE_VERSION = "20"
+  NEXT_TELEMETRY_DISABLED = "1"
+
+# Use the Next.js runtime plugin (handles SSR & API routes)
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
+
+# Make sure /api/* routes work after deploy (no 404 on refresh)
+[[redirects]]
+  from = "/api/*"
+  to = "/.netlify/functions/server"
+  status = 200
+
+[[headers]]
+  for = "/api/*"
+  [headers.values]
+    Access-Control-Allow-Origin = "*"
+    Access-Control-Allow-Methods = "GET, POST, PUT, DELETE, PATCH, OPTIONS"
+    Access-Control-Allow-Headers = "Content-Type, Authorization"

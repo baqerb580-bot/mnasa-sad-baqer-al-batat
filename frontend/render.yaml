@@ -1,0 +1,34 @@
+# ============================================================
+# Render Blueprint — مركز الغزلان ERP
+# Provisions Next.js web service + MongoDB Atlas connection
+# ============================================================
+
+services:
+  - type: web
+    name: ghazlan-erp
+    runtime: node
+    region: frankfurt
+    plan: starter
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/notifications/admin
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NEXT_TELEMETRY_DISABLED
+        value: "1"
+      - key: MONGO_URL
+        sync: false
+      - key: DB_NAME
+        value: ghazlan_erp
+      - key: NEXT_PUBLIC_BASE_URL
+        sync: false
+      - key: CORS_ORIGINS
+        value: "*"
+      - key: EMERGENT_LLM_KEY
+        sync: false
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_SUPER_ADMIN_ID
+        sync: false

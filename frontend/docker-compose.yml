@@ -1,0 +1,52 @@
+version: '3.8'
+
+# ============================================================
+# docker-compose — مركز الغزلان ERP
+# Runs the Next.js app + MongoDB in one command:
+#   docker compose up -d
+# ============================================================
+
+services:
+  mongodb:
+    image: mongo:7
+    container_name: ghazlan-mongo
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    environment:
+      MONGO_INITDB_DATABASE: ghazlan_erp
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ghazlan-app
+    restart: unless-stopped
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+    environment:
+      MONGO_URL: mongodb://mongodb:27017
+      DB_NAME: ${DB_NAME:-ghazlan_erp}
+      NEXT_PUBLIC_BASE_URL: ${NEXT_PUBLIC_BASE_URL:-http://localhost:3000}
+      CORS_ORIGINS: ${CORS_ORIGINS:-*}
+      EMERGENT_LLM_KEY: ${EMERGENT_LLM_KEY:-}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_SUPER_ADMIN_ID: ${TELEGRAM_SUPER_ADMIN_ID:-}
+      NODE_ENV: production
+    volumes:
+      # Persist uploaded files (photos, attachments) outside the container
+      - uploads_data:/app/public/uploads
+
+volumes:
+  mongo_data:
+  uploads_data:
