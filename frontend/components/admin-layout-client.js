@@ -10,7 +10,7 @@ import { toast } from 'sonner';
 // header widget (user avatar + logout + settings + 2FA)
 // ===========================================================
 
-function HeaderUserWidget() {
+export function HeaderUserWidget({ inline = false }) {
   const { user, logout } = useAuth();
   const [open, setOpen] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
@@ -33,11 +33,26 @@ function HeaderUserWidget() {
     router.replace('/admin/login');
   };
 
+  // When `inline` is true, render as a normal flex item (used inside the TopBar of the dashboard).
+  // When `inline` is false, keep the legacy floating widget for pages without a TopBar (e.g. /admin/users).
+  const wrapperClass = inline
+    ? 'relative inline-flex items-center'
+    : 'fixed top-3 left-3 z-[80] md:left-auto md:right-3';
+
+  // Dropdown anchoring: when floating on the visual top-LEFT we want the menu to open
+  // aligned to the LEFT edge of the trigger; when inline (rendered at the visual far-left of
+  // the topbar actions in RTL) we want the menu to open below/aligned to its RIGHT edge so
+  // it stays inside the viewport on small screens.
+  const menuAnchorClass = inline
+    ? 'absolute top-full right-0 mt-2'
+    : 'absolute top-full left-0 mt-2 md:left-auto md:right-0';
+
   return (
     <>
-      <div className="fixed top-3 right-3 z-[80]" data-user-widget>
+      <div className={wrapperClass} data-user-widget data-testid="header-user-widget">
         <button
           onClick={() => setOpen(!open)}
+          data-testid="header-user-widget-toggle"
           className="flex items-center gap-2 bg-black/60 backdrop-blur-md border border-[#d4af37]/30 hover:border-[#d4af37]/60 rounded-full px-3 py-1.5 shadow-lg transition group"
         >
           <div className="w-7 h-7 rounded-full bg-gradient-to-br from-[#d4af37] to-[#b8860b] text-black font-black text-xs flex items-center justify-center">
@@ -54,7 +69,7 @@ function HeaderUserWidget() {
         </button>
 
         {open && (
-          <div className="absolute top-full left-0 mt-2 w-64 bg-[#13131f] border border-[#d4af37]/30 rounded-2xl shadow-2xl overflow-hidden" dir="rtl">
+          <div className={`${menuAnchorClass} w-64 bg-[#13131f] border border-[#d4af37]/30 rounded-2xl shadow-2xl overflow-hidden z-[90]`} dir="rtl">
             <div className="p-3 border-b border-[#d4af37]/10 bg-[#d4af37]/5">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-full bg-gradient-to-br from-[#d4af37] to-[#b8860b] text-black font-black flex items-center justify-center">
