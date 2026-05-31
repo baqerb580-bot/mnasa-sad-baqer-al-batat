@@ -98,7 +98,8 @@ function HeaderUserWidget() {
 // PROFILE / 2FA SETUP DIALOG
 // ===========================================================
 function ProfileDialog({ onClose }) {
-  const { user, refresh } = useAuth();
+  const { user, refresh, logout } = useAuth();
+  const router = useRouter();
   const [tab, setTab] = useState('profile');
   const [step, setStep] = useState('idle'); // for 2fa setup
   const [setupData, setSetupData] = useState(null);
@@ -106,24 +107,37 @@ function ProfileDialog({ onClose }) {
   const [recoveryCodes, setRecoveryCodes] = useState(null);
   const [disablePassword, setDisablePassword] = useState('');
   const [pwForm, setPwForm] = useState({ current: '', next: '', confirm: '' });
+  const [busy, setBusy] = useState(null); // 'start2fa' | 'verify2fa' | 'disable2fa' | 'changepw'
 
-  const auth = (path, opts = {}) => {
+  const auth = async (path, opts = {}) => {
     const token = typeof window !== 'undefined' ? localStorage.getItem('gz_token') : null;
-    return fetch(`/api/${path}`, {
-      ...opts,
-      headers: { 'Content-Type': 'application/json', ...(token ? { 'Authorization': `Bearer ${token}` } : {}), ...(opts.headers || {}) },
-    }).then(r => r.json());
+    try {
+      const r = await fetch(`/api/${path}`, {
+        ...opts,
+        headers: { 'Content-Type': 'application/json', ...(token ? { 'Authorization': `Bearer ${token}` } : {}), ...(opts.headers || {}) },
+      });
+      return await r.json();
+    } catch (e) {
+      return { error: 'تعذّر الاتصال بالخادم. تأكد من الإنترنت.' };
+    }
   };
 
   const start2FA = async () => {
+    if (busy) return;
+    setBusy('start2fa');
     const r = await auth('auth/2fa/setup', { method: 'POST' });
+    setBusy(null);
     if (r?.error) { toast.error(r.error); return; }
     setSetupData(r);
     setStep('verify');
   };
 
   const verify2FA = async () => {
+    if (busy) return;
+    if (!/^\d{6}$/.test(code)) { toast.error('أدخل رمزاً مكوّناً من 6 أرقام'); return; }
+    setBusy('verify2fa');
     const r = await auth('auth/2fa/verify', { method: 'POST', body: JSON.stringify({ code }) });
+    setBusy(null);
     if (r?.error) { toast.error(r.error); return; }
     setRecoveryCodes(r.recoveryCodes);
     setStep('codes');
@@ -132,8 +146,11 @@ function ProfileDialog({ onClose }) {
   };
 
   const disable2FA = async () => {
+    if (busy) return;
     if (!disablePassword) { toast.error('أدخل كلمة المرور'); return; }
+    setBusy('disable2fa');
     const r = await auth('auth/2fa/disable', { method: 'POST', body: JSON.stringify({ password: disablePassword }) });
+    setBusy(null);
     if (r?.error) { toast.error(r.error); return; }
     setDisablePassword('');
     refresh();
@@ -141,12 +158,22 @@ function ProfileDialog({ onClose }) {
   };
 
   const changePassword = async () => {
+    if (busy) return;
+    if (!pwForm.current) { toast.error('أدخل كلمة المرور الحالية'); return; }
     if (pwForm.next !== pwForm.confirm) { toast.error('كلمتا المرور غير متطابقتين'); return; }
     if (pwForm.next.length < 6) { toast.error('كلمة المرور قصيرة (6+ أحرف)'); return; }
+    if (pwForm.next === pwForm.current) { toast.error('كلمة المرور الجديدة مطابقة للحالية'); return; }
+    setBusy('changepw');
     const r = await auth('auth/change-password', { method: 'POST', body: JSON.stringify({ currentPassword: pwForm.current, newPassword: pwForm.next }) });
+    setBusy(null);
     if (r?.error) { toast.error(r.error); return; }
     setPwForm({ current: '', next: '', confirm: '' });
-    toast.success('تم تغيير كلمة المرور — قد تحتاج لتسجيل الدخول مجدداً');
+    toast.success('تم تغيير كلمة المرور — سيتم تسجيل خروجك الآن');
+    // Force re-login for security after password change
+    setTimeout(async () => {
+      try { await logout?.(); } catch {}
+      router.replace('/admin/login');
+    }, 1200);
   };
 
   return (
@@ -182,7 +209,14 @@ function ProfileDialog({ onClose }) {
             <Input label="كلمة المرور الحالية" type="password" value={pwForm.current} onChange={v => setPwForm({...pwForm, current: v})} />
             <Input label="كلمة المرور الجديدة" type="password" value={pwForm.next} onChange={v => setPwForm({...pwForm, next: v})} />
             <Input label="تأكيد كلمة المرور" type="password" value={pwForm.confirm} onChange={v => setPwForm({...pwForm, confirm: v})} />
-            <button onClick={changePassword} className="w-full py-3 rounded-xl bg-gradient-to-r from-[#b8860b] to-[#d4af37] text-black font-bold hover:opacity-90 transition">تغيير كلمة المرور</button>
+            <button
+              onClick={changePassword}
+              disabled={busy === 'changepw'}
+              className="w-full py-3 rounded-xl bg-gradient-to-r from-[#b8860b] to-[#d4af37] text-black font-bold hover:opacity-90 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            >
+              {busy === 'changepw' && <Loader2 className="w-4 h-4 animate-spin" />}
+              {busy === 'changepw' ? 'جارٍ التغيير...' : 'تغيير كلمة المرور'}
+            </button>
           </div>
         )}
 
@@ -197,7 +231,14 @@ function ProfileDialog({ onClose }) {
                 </div>
                 <div className="mt-4 space-y-2">
                   <Input label="أدخل كلمة المرور للتعطيل" type="password" value={disablePassword} onChange={setDisablePassword} />
-                  <button onClick={disable2FA} className="w-full py-2.5 rounded-xl bg-red-500/20 border border-red-500/40 text-red-300 font-bold hover:bg-red-500/30 transition">تعطيل 2FA</button>
+                  <button
+                    onClick={disable2FA}
+                    disabled={busy === 'disable2fa'}
+                    className="w-full py-2.5 rounded-xl bg-red-500/20 border border-red-500/40 text-red-300 font-bold hover:bg-red-500/30 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                  >
+                    {busy === 'disable2fa' && <Loader2 className="w-4 h-4 animate-spin" />}
+                    {busy === 'disable2fa' ? 'جارٍ التعطيل...' : 'تعطيل 2FA'}
+                  </button>
                 </div>
               </div>
             ) : (
@@ -207,7 +248,14 @@ function ProfileDialog({ onClose }) {
                     <Smartphone className="w-12 h-12 mx-auto text-[#d4af37] mb-3" />
                     <h3 className="font-bold text-white mb-1">حماية إضافية لحسابك</h3>
                     <p className="text-xs text-gray-400 mb-4 leading-relaxed">فعّل المصادقة الثنائية باستخدام تطبيق مثل Google Authenticator أو Microsoft Authenticator أو Authy.</p>
-                    <button onClick={start2FA} className="w-full py-3 rounded-xl bg-gradient-to-r from-[#b8860b] to-[#d4af37] text-black font-bold hover:opacity-90 transition">ابدأ التفعيل</button>
+                    <button
+                      onClick={start2FA}
+                      disabled={busy === 'start2fa'}
+                      className="w-full py-3 rounded-xl bg-gradient-to-r from-[#b8860b] to-[#d4af37] text-black font-bold hover:opacity-90 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                    >
+                      {busy === 'start2fa' && <Loader2 className="w-4 h-4 animate-spin" />}
+                      {busy === 'start2fa' ? 'جارٍ التحضير...' : 'ابدأ التفعيل'}
+                    </button>
                   </div>
                 )}
                 {step === 'verify' && setupData && (
@@ -220,9 +268,16 @@ function ProfileDialog({ onClose }) {
                       <p className="text-[10px] text-gray-500">أو أدخل المفتاح يدوياً:</p>
                       <p className="text-xs font-mono text-[#d4af37] mt-0.5 break-all">{setupData.secret}</p>
                     </div>
-                    <Input label="أدخل الرمز من تطبيقك (6 أرقام)" value={code} onChange={setCode} placeholder="123456" />
-                    <button onClick={verify2FA} className="w-full py-3 rounded-xl bg-gradient-to-r from-[#b8860b] to-[#d4af37] text-black font-bold hover:opacity-90 transition">تحقّق وفعّل</button>
-                    <button onClick={() => setStep('idle')} className="w-full text-xs text-gray-400 hover:text-white">إلغاء</button>
+                    <Input label="أدخل الرمز من تطبيقك (6 أرقام)" value={code} onChange={(v) => setCode(String(v).replace(/\D/g, '').slice(0, 6))} placeholder="123456" />
+                    <button
+                      onClick={verify2FA}
+                      disabled={busy === 'verify2fa' || code.length !== 6}
+                      className="w-full py-3 rounded-xl bg-gradient-to-r from-[#b8860b] to-[#d4af37] text-black font-bold hover:opacity-90 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                    >
+                      {busy === 'verify2fa' && <Loader2 className="w-4 h-4 animate-spin" />}
+                      {busy === 'verify2fa' ? 'جارٍ التحقّق...' : 'تحقّق وفعّل'}
+                    </button>
+                    <button onClick={() => { setStep('idle'); setCode(''); }} className="w-full text-xs text-gray-400 hover:text-white">إلغاء</button>
                   </div>
                 )}
                 {step === 'codes' && recoveryCodes && (
@@ -258,16 +313,17 @@ function Field({ label, value, mono }) {
 }
 
 function Input({ label, value, onChange, type = 'text', placeholder }) {
+  const safeValue = value == null ? '' : String(value);
   return (
     <div>
       <label className="block text-xs font-bold text-[#d4af37]/80 mb-1">{label}</label>
       <input
         type={type}
-        value={value}
+        value={safeValue}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
         className="w-full px-3 py-2.5 rounded-xl bg-black/40 border border-[#d4af37]/20 focus:border-[#d4af37] focus:ring-2 focus:ring-[#d4af37]/20 outline-none text-white placeholder-gray-600 transition"
-        dir={type === 'password' || /^\d/.test(value) ? 'ltr' : 'rtl'}
+        dir={type === 'password' || /^\d/.test(safeValue) ? 'ltr' : 'rtl'}
       />
     </div>
   );

@@ -21,7 +21,9 @@ export function BarcodeScanner({ open, onClose, onDetected, continuous = false, 
   const [lastScan, setLastScan] = useState(null);
   const [error, setError] = useState(null);
   const [torchOn, setTorchOn] = useState(false);
+  const [torchSupported, setTorchSupported] = useState(false);
   const scannerRef = useRef(null);
+  const lastDetectedRef = useRef({ text: null, ts: 0 });
   const elementId = 'barcode-scanner-region';
 
   // Load cameras on open
@@ -42,10 +44,28 @@ export function BarcodeScanner({ open, onClose, onDetected, continuous = false, 
         const back = devices.find(d => /back|rear|environment/i.test(d.label)) || devices[devices.length - 1];
         setCurrentCameraId(back.id);
       } catch (e) {
-        setError('فشل الوصول للكاميرا: ' + (e?.message || 'تأكد من السماح بصلاحية الكاميرا.'));
+        const msg = e?.message || '';
+        if (/Permission|NotAllowed|denied/i.test(msg)) {
+          setError('🚫 تم رفض إذن الكاميرا. فعّل الإذن من إعدادات المتصفح ثم أعد المحاولة.');
+        } else if (/NotFound|no.*camera/i.test(msg)) {
+          setError('❌ لم يتم العثور على كاميرا في هذا الجهاز.');
+        } else {
+          setError('فشل الوصول للكاميرا: ' + (msg || 'تأكد من السماح بصلاحية الكاميرا.'));
+        }
       }
     })();
     return () => { cancelled = true; };
+  }, [open]);
+
+  // Reset state when dialog closes
+  useEffect(() => {
+    if (!open) {
+      setLastScan(null);
+      setError(null);
+      setTorchOn(false);
+      setTorchSupported(false);
+      lastDetectedRef.current = { text: null, ts: 0 };
+    }
   }, [open]);
 
   // Start/stop scanner when camera changes
@@ -70,19 +90,43 @@ export function BarcodeScanner({ open, onClose, onDetected, continuous = false, 
             disableFlip: false,
           },
           (decodedText, decodedResult) => {
-            // success callback
-            setLastScan({ text: decodedText, format: decodedResult?.result?.format?.formatName, ts: Date.now() });
+            // De-duplicate identical scans within 1.5s (important in continuous mode)
+            const now = Date.now();
+            if (lastDetectedRef.current.text === decodedText && (now - lastDetectedRef.current.ts) < 1500) {
+              return;
+            }
+            lastDetectedRef.current = { text: decodedText, ts: now };
+
+            setLastScan({ text: decodedText, format: decodedResult?.result?.format?.formatName, ts: now });
             try { navigator.vibrate?.(120); } catch {}
             try { onDetected?.(decodedText, decodedResult); } catch {}
             if (!continuous) {
-              try { html5Qrcode.stop(); } catch {}
+              try { html5Qrcode.stop().catch(() => {}); } catch {}
               setScanning(false);
             }
           },
           () => {} // error callback (fired every frame, ignore)
         );
+
+        // Detect torch capability after stream starts
+        try {
+          const caps = html5Qrcode.getRunningTrackCameraCapabilities?.();
+          const hasTorch = !!(caps && typeof caps.torchFeature === 'function' && caps.torchFeature()?.isSupported?.());
+          setTorchSupported(hasTorch);
+        } catch {
+          setTorchSupported(false);
+        }
       } catch (e) {
-        if (!cancelled) setError('تعذّر تشغيل الكاميرا: ' + (e?.message || 'حاول إعادة المحاولة'));
+        if (!cancelled) {
+          const msg = e?.message || '';
+          if (/Permission|NotAllowed|denied/i.test(msg)) {
+            setError('🚫 تم رفض إذن الكاميرا. فعّل الإذن من إعدادات المتصفح.');
+          } else if (/NotReadable|in use/i.test(msg)) {
+            setError('⚠️ الكاميرا قيد الاستخدام من تطبيق آخر. أغلقه ثم حاول مجدداً.');
+          } else {
+            setError('تعذّر تشغيل الكاميرا: ' + (msg || 'حاول إعادة المحاولة'));
+          }
+        }
         setScanning(false);
       }
     })();
@@ -100,6 +144,7 @@ export function BarcodeScanner({ open, onClose, onDetected, continuous = false, 
     if (cameras.length < 2) return;
     const idx = cameras.findIndex(c => c.id === currentCameraId);
     const next = cameras[(idx + 1) % cameras.length];
+    setTorchOn(false);
     setCurrentCameraId(next.id);
   };
 
@@ -107,14 +152,21 @@ export function BarcodeScanner({ open, onClose, onDetected, continuous = false, 
     const sc = scannerRef.current;
     if (!sc) return;
     try {
-      const stream = sc.getVideoElement?.()?.srcObject;
-      const track = stream?.getVideoTracks?.()?.[0];
-      if (!track || !('applyConstraints' in track)) {
-        toast.warning('⚠️ هذا المتصفح لا يدعم الفلاش');
+      // Preferred html5-qrcode API for torch
+      const caps = sc.getRunningTrackCameraCapabilities?.();
+      const torchFeature = caps?.torchFeature?.();
+      if (torchFeature?.isSupported?.()) {
+        await torchFeature.apply(!torchOn);
+        setTorchOn(!torchOn);
         return;
       }
-      await track.applyConstraints({ advanced: [{ torch: !torchOn }] });
-      setTorchOn(!torchOn);
+      // Fallback: applyVideoConstraints
+      if (typeof sc.applyVideoConstraints === 'function') {
+        await sc.applyVideoConstraints({ advanced: [{ torch: !torchOn }] });
+        setTorchOn(!torchOn);
+        return;
+      }
+      toast.warning('⚠️ هذا المتصفح/الكاميرا لا يدعم الفلاش');
     } catch (e) {
       toast.error('الكاميرا لا تدعم الفلاش');
     }
@@ -179,7 +231,14 @@ export function BarcodeScanner({ open, onClose, onDetected, continuous = false, 
                 <RefreshCw className="w-3 h-3 ml-1" /> تبديل الكاميرا
               </Button>
             )}
-            <Button size="sm" variant="outline" onClick={toggleTorch} className={`${torchOn ? 'bg-amber-500/20 text-amber-400 border-amber-500/40' : 'border-zinc-500/40 text-zinc-400'}`}>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={toggleTorch}
+              disabled={!torchSupported}
+              title={torchSupported ? '' : 'الفلاش غير مدعوم على هذه الكاميرا'}
+              className={`${torchOn ? 'bg-amber-500/20 text-amber-400 border-amber-500/40' : 'border-zinc-500/40 text-zinc-400'} disabled:opacity-40 disabled:cursor-not-allowed`}
+            >
               {torchOn ? <Zap className="w-3 h-3 ml-1" /> : <ZapOff className="w-3 h-3 ml-1" />}
               {torchOn ? 'إطفاء الفلاش' : 'تشغيل الفلاش'}
             </Button>
